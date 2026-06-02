@@ -2,6 +2,10 @@
 
 All notable changes to this project. Each entry links to its full per-version file in [changelog/](changelog/).
 
+## [0.1.6](changelog/0.1.x/0.1.6.md) — 2026-06-02
+
+mcp-ts-core ^0.9.16 → ^0.9.21 — per-request log context fix, secret-stripped error messages, fail-fast retry logic.
+
 ## [0.1.5](changelog/0.1.x/0.1.5.md) — 2026-05-30
 
 Enrichment adoption — search/coverage tools surface query echoes, result totals, and empty-result guidance in a typed enrichment block reaching both structuredContent and content[] channels.

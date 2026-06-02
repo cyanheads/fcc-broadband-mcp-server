@@ -1,0 +1,9 @@
+{
+  "@cyanheads/fcc-broadband-mcp-server": {
+    "command": "npx",
+    "args": ["-y", "@cyanheads/fcc-broadband-mcp-server"],
+    "env": {
+      "MCP_TRANSPORT_TYPE": "stdio"
+    }
+  }
+}

@@ -1,10 +1,15 @@
 # fcc-broadband-mcp-server - Directory Structure
 
-Generated on: 2026-05-29 05:11:11
+Generated on: 2026-06-02 14:14:51
 
 ```text
 fcc-broadband-mcp-server/
 ├── .claude/
+├── .claude-plugin/
+│   └── plugin.json
+├── .codex-plugin/
+│   ├── mcp.json
+│   └── plugin.json
 ├── .github/
 │   ├── ISSUE_TEMPLATE/
 │   │   ├── bug_report.yml
@@ -25,12 +30,14 @@ fcc-broadband-mcp-server/
 │   ├── build.ts
 │   ├── check-docs-sync.ts
 │   ├── check-framework-antipatterns.ts
+│   ├── check-skill-versions.ts
 │   ├── check-skills-sync.ts
 │   ├── clean.ts
 │   ├── devcheck.ts
 │   ├── lint-mcp.ts
 │   ├── lint-packaging.ts
 │   ├── list-skills.ts
+│   ├── release-github.ts
 │   └── tree.ts
 ├── skills/
 │   ├── add-app-tool/
@@ -56,6 +63,8 @@ fcc-broadband-mcp-server/
 │   ├── api-errors/
 │   │   └── SKILL.md
 │   ├── api-linter/
+│   │   └── SKILL.md
+│   ├── api-mirror/
 │   │   └── SKILL.md
 │   ├── api-services/
 │   │   ├── references/
@@ -84,6 +93,13 @@ fcc-broadband-mcp-server/
 │   ├── git-wrapup/
 │   │   └── SKILL.md
 │   ├── maintenance/
+│   │   └── SKILL.md
+│   ├── orchestrations/
+│   │   ├── workflows/
+│   │   │   ├── field-test-fix.md
+│   │   │   ├── fix-wrapup-release.md
+│   │   │   ├── greenfield-build.md
+│   │   │   └── maintenance-release.md
 │   │   └── SKILL.md
 │   ├── polish-docs-meta/
 │   │   ├── references/
@@ -143,12 +159,15 @@ fcc-broadband-mcp-server/
 ├── tests/
 │   ├── prompts/
 │   ├── resources/
+│   │   ├── geography-summary.resource.test.ts
+│   │   └── providers-list.resource.test.ts
 │   └── tools/
 │       ├── compare-areas.tool.test.ts
 │       ├── find-underserved.tool.test.ts
 │       ├── geocode-block.tool.test.ts
 │       ├── get-coverage-summary.tool.test.ts
 │       ├── get-provider.tool.test.ts
+│       ├── list-downloads.tool.test.ts
 │       ├── list-filing-periods.tool.test.ts
 │       ├── search-availability.tool.test.ts
 │       └── search-providers.tool.test.ts
@@ -156,6 +175,7 @@ fcc-broadband-mcp-server/
 ├── .env.example
 ├── .gitignore
 ├── .mcpbignore
+├── AGENTS.md
 ├── biome.json
 ├── bun.lock
 ├── bunfig.toml
