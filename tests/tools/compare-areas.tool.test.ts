@@ -106,6 +106,23 @@ describe('compareAreasTool', () => {
     ).toThrow();
   });
 
+  it('throws missing_geography_ids when no geography_ids and compare_all_states is false', async () => {
+    const ctx = createMockContext({ errors: compareAreasTool.errors });
+    // geography_ids defaults to undefined, compare_all_states defaults to false
+    // geoIds will be [] which has length < 2
+    const input = {
+      geography_type: 'county' as const,
+      tech_filter: 'acfosw' as const,
+      speed_down: '25' as const,
+      sort_by: 'unserved_pct' as const,
+      compare_all_states: false,
+    };
+    await expect(compareAreasTool.handler(input, ctx)).rejects.toMatchObject({
+      code: JsonRpcErrorCode.ValidationError,
+      data: { reason: 'missing_geography_ids' },
+    });
+  });
+
   it('throws no_data_found when service returns empty array', async () => {
     mockGetAreaStatsBatch.mockResolvedValue([]);
     const ctx = createMockContext({ errors: compareAreasTool.errors });

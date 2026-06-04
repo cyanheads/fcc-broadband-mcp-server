@@ -179,6 +179,13 @@ export const compareAreasTool = tool('fcc_compare_areas', {
       recovery:
         'Set geography_type="state" when using compare_all_states=true, or provide specific geography_ids.',
     },
+    {
+      reason: 'missing_geography_ids',
+      code: JsonRpcErrorCode.ValidationError,
+      when: 'No geography_ids provided and compare_all_states is false.',
+      recovery:
+        'Provide at least 2 geography_ids, or set compare_all_states=true with geography_type="state".',
+    },
   ],
 
   async handler(input, ctx) {
@@ -194,9 +201,9 @@ export const compareAreasTool = tool('fcc_compare_areas', {
 
     if (geoIds.length < 2) {
       throw ctx.fail(
-        'invalid_all_states_combo',
+        'missing_geography_ids',
         'Provide at least 2 geography_ids to compare, or set compare_all_states=true.',
-        { ...ctx.recoveryFor('invalid_all_states_combo') },
+        { ...ctx.recoveryFor('missing_geography_ids') },
       );
     }
 

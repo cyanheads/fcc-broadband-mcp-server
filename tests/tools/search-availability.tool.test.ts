@@ -103,14 +103,13 @@ describe('searchAvailabilityTool', () => {
     expect(enrichment.notice).toContain('530330081021016');
   });
 
-  it('propagates NotFound when service throws block_not_found', async () => {
-    mockGetDeploymentByBlock.mockRejectedValue(
-      Object.assign(new Error('not found'), { code: JsonRpcErrorCode.NotFound }),
-    );
+  it('throws block_not_found when service returns empty with no filters', async () => {
+    mockGetDeploymentByBlock.mockResolvedValue([]);
     const ctx = createMockContext({ errors: searchAvailabilityTool.errors });
     const input = searchAvailabilityTool.input.parse({ block_fips: '530330081021016' });
     await expect(searchAvailabilityTool.handler(input, ctx)).rejects.toMatchObject({
       code: JsonRpcErrorCode.NotFound,
+      data: { reason: 'block_not_found' },
     });
   });
 

@@ -55,14 +55,13 @@ describe('getProviderTool', () => {
     expect(result.speedTierLocations.length).toBe(5);
   });
 
-  it('propagates NotFound when provider does not exist', async () => {
-    mockGetProviderSummary.mockRejectedValue(
-      Object.assign(new Error('not found'), { code: JsonRpcErrorCode.NotFound }),
-    );
+  it('throws provider_not_found when service returns null', async () => {
+    mockGetProviderSummary.mockResolvedValue(null);
     const ctx = createMockContext({ errors: getProviderTool.errors });
     const input = getProviderTool.input.parse({ hoconum: '999999' });
     await expect(getProviderTool.handler(input, ctx)).rejects.toMatchObject({
       code: JsonRpcErrorCode.NotFound,
+      data: { reason: 'provider_not_found' },
     });
   });
 

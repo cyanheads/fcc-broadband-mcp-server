@@ -7,7 +7,7 @@
 
 import type { Context } from '@cyanheads/mcp-ts-core';
 import type { AppConfig } from '@cyanheads/mcp-ts-core/config';
-import { notFound, serviceUnavailable } from '@cyanheads/mcp-ts-core/errors';
+import { serviceUnavailable } from '@cyanheads/mcp-ts-core/errors';
 import type { StorageService } from '@cyanheads/mcp-ts-core/storage';
 import { httpErrorFromResponse, withRetry } from '@cyanheads/mcp-ts-core/utils';
 import type { ServerConfig } from '@/config/server-config.js';
@@ -198,13 +198,7 @@ export class OpenDataService {
     );
 
     if (rows.length === 0) {
-      throw notFound(
-        `No broadband providers found for census block ${blockFips}. The block may be non-residential or have no reported coverage.`,
-        {
-          reason: 'block_not_found',
-          blockFips,
-        },
-      );
+      return [];
     }
 
     return rows.map((r) => ({
@@ -262,14 +256,7 @@ export class OpenDataService {
     );
 
     if (rows.length === 0) {
-      throw notFound(
-        `No area data found for geography type="${options.geographyType}", id="${geographyId}". Check the FIPS code format or try a different geography type.`,
-        {
-          reason: 'geography_not_found',
-          geographyType: options.geographyType,
-          geographyId,
-        },
-      );
+      return [];
     }
 
     return rows.map((r) => {
@@ -478,7 +465,7 @@ export class OpenDataService {
     holdingCompanyName: string;
     techCodes: string[];
     speedTierLocations: Record<string, number>;
-  }> {
+  } | null> {
     const nameUrl = this.buildUrl(DATASET_IDS.DEPLOYMENT, {
       $select: 'hoconum,holdingcompanyname',
       $where: `hoconum='${hoconum}'`,
@@ -488,10 +475,7 @@ export class OpenDataService {
 
     const nameRows = await this.fetchJson<RawProviderRow>(nameUrl, ctx);
     if (nameRows.length === 0) {
-      throw notFound(
-        `No provider found with hoconum "${hoconum}". Use fcc_search_providers to find valid hoconum values.`,
-        { reason: 'provider_not_found', hoconum },
-      );
+      return null;
     }
 
     const holdingCompanyName = nameRows[0]?.holdingcompanyname ?? '';

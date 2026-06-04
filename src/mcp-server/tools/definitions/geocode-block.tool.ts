@@ -61,6 +61,15 @@ export const geocodeBlockTool = tool('fcc_geocode_block', {
     ctx.log.info('fcc_geocode_block', { latitude: input.latitude, longitude: input.longitude });
     const service = getGeoApiService();
     const result = await service.findBlock(input.latitude, input.longitude, ctx);
+
+    if (!result) {
+      throw ctx.fail(
+        'block_not_found',
+        'No census block found at the given coordinates — may be over water or outside US coverage.',
+        { ...ctx.recoveryFor('block_not_found') },
+      );
+    }
+
     ctx.log.info('fcc_geocode_block succeeded', { blockFips: result.blockFips });
     return result;
   },

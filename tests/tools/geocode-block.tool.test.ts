@@ -42,13 +42,14 @@ describe('geocodeBlockTool', () => {
     expect(mockFindBlock).toHaveBeenCalledWith(47.6062, -122.3321, ctx);
   });
 
-  it('propagates service errors', async () => {
-    mockFindBlock.mockRejectedValue(
-      Object.assign(new Error('block_not_found'), { code: JsonRpcErrorCode.NotFound }),
-    );
+  it('throws block_not_found when service returns null (no block at coordinates)', async () => {
+    mockFindBlock.mockResolvedValue(null);
     const ctx = createMockContext({ errors: geocodeBlockTool.errors });
     const input = geocodeBlockTool.input.parse({ latitude: 0, longitude: 0 });
-    await expect(geocodeBlockTool.handler(input, ctx)).rejects.toThrow();
+    await expect(geocodeBlockTool.handler(input, ctx)).rejects.toMatchObject({
+      code: JsonRpcErrorCode.NotFound,
+      data: { reason: 'block_not_found' },
+    });
   });
 
   it('formats output with blockFips, county, and state', () => {

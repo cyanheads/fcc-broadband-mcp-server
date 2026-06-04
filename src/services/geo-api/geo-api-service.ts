@@ -6,7 +6,7 @@
 
 import type { Context } from '@cyanheads/mcp-ts-core';
 import type { AppConfig } from '@cyanheads/mcp-ts-core/config';
-import { notFound, serviceUnavailable } from '@cyanheads/mcp-ts-core/errors';
+import { serviceUnavailable } from '@cyanheads/mcp-ts-core/errors';
 import type { StorageService } from '@cyanheads/mcp-ts-core/storage';
 import { httpErrorFromResponse, withRetry } from '@cyanheads/mcp-ts-core/utils';
 import type { BlockLocation, GeoApiBlockResponse } from './types.js';
@@ -22,8 +22,9 @@ export class GeoApiService {
 
   /**
    * Converts a lat/lon coordinate to census block FIPS and geographic identifiers.
+   * Returns null when no block exists at the given coordinates (over water, outside US coverage).
    */
-  findBlock(latitude: number, longitude: number, ctx: Context): Promise<BlockLocation> {
+  findBlock(latitude: number, longitude: number, ctx: Context): Promise<BlockLocation | null> {
     return withRetry(
       async () => {
         const url = `${BASE_URL}/block/find?latitude=${latitude}&longitude=${longitude}&format=json`;
@@ -47,12 +48,7 @@ export class GeoApiService {
         const raw = (await response.json()) as GeoApiBlockResponse;
 
         if (raw.isError || !raw.Block?.FIPS) {
-          const msg = raw.messages?.join('; ') ?? 'No block found at this coordinate';
-          throw notFound(`FCC Geo API returned no block: ${msg}`, {
-            reason: 'block_not_found',
-            latitude,
-            longitude,
-          });
+          return null;
         }
 
         const blockFips = raw.Block.FIPS;

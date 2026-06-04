@@ -89,10 +89,8 @@ describe('getCoverageSummaryTool', () => {
     });
   });
 
-  it('propagates NotFound from service', async () => {
-    mockGetAreaSegments.mockRejectedValue(
-      Object.assign(new Error('not found'), { code: JsonRpcErrorCode.NotFound }),
-    );
+  it('throws geography_not_found when service returns empty segments', async () => {
+    mockGetAreaSegments.mockResolvedValue([]);
     const ctx = createMockContext({ errors: getCoverageSummaryTool.errors });
     const input = getCoverageSummaryTool.input.parse({
       geography_type: 'state',
@@ -100,6 +98,7 @@ describe('getCoverageSummaryTool', () => {
     });
     await expect(getCoverageSummaryTool.handler(input, ctx)).rejects.toMatchObject({
       code: JsonRpcErrorCode.NotFound,
+      data: { reason: 'geography_not_found' },
     });
   });
 

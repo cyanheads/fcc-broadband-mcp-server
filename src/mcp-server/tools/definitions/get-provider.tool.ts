@@ -58,6 +58,14 @@ export const getProviderTool = tool('fcc_get_provider', {
     const service = getOpenDataService();
     const summary = await service.getProviderSummary(input.hoconum, ctx);
 
+    if (!summary) {
+      throw ctx.fail(
+        'provider_not_found',
+        `No provider found with hoconum "${input.hoconum}". Use fcc_search_providers to find valid hoconum values.`,
+        { ...ctx.recoveryFor('provider_not_found') },
+      );
+    }
+
     const speedTierLocations = Object.entries(summary.speedTierLocations)
       .filter(([, count]) => count > 0)
       .map(([tier, count]) => ({

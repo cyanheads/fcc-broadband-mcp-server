@@ -195,6 +195,16 @@ export const getCoverageSummaryTool = tool('fcc_get_coverage_summary', {
         .catch(() => undefined),
     ]);
 
+    const geographyId = input.geography_type === 'nation' ? '0' : (input.geography_id ?? '');
+
+    if (segments.length === 0) {
+      throw ctx.fail(
+        'geography_not_found',
+        `No area data found for geography type="${input.geography_type}", id="${geographyId}". Check the FIPS code format or try a different geography type.`,
+        { ...ctx.recoveryFor('geography_not_found') },
+      );
+    }
+
     // Aggregate totals across all segments
     let totalNoCoverage = 0;
     let totalOne = 0;
@@ -213,8 +223,6 @@ export const getCoverageSummaryTool = tool('fcc_get_coverage_summary', {
     const coveragePct = totalPop > 0 ? ((totalPop - totalNoCoverage) / totalPop) * 100 : 0;
     const unservedPct = totalPop > 0 ? (totalNoCoverage / totalPop) * 100 : 0;
     const competitivePct = totalPop > 0 ? ((totalTwo + totalThreePlus) / totalPop) * 100 : 0;
-
-    const geographyId = input.geography_type === 'nation' ? '0' : (input.geography_id ?? '');
 
     ctx.log.info('fcc_get_coverage_summary succeeded', {
       type: input.geography_type,

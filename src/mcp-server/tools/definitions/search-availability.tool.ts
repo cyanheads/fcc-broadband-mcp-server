@@ -158,6 +158,19 @@ export const searchAvailabilityTool = tool('fcc_search_availability', {
       ctx,
     );
 
+    if (
+      records.length === 0 &&
+      !input.tech_filter?.length &&
+      input.min_speed_down === undefined &&
+      input.consumer === undefined
+    ) {
+      throw ctx.fail(
+        'block_not_found',
+        `No broadband providers found for census block ${input.block_fips}. The block may be non-residential or have no reported coverage.`,
+        { ...ctx.recoveryFor('block_not_found') },
+      );
+    }
+
     const holdingCompanyNames = new Set(records.map((r) => r.holdingCompanyName));
 
     const providers = records.map((r) => ({
