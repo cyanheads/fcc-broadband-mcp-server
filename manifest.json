@@ -1,7 +1,7 @@
 {
   "manifest_version": "0.3",
   "name": "fcc-broadband-mcp-server",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "FCC broadband availability, coverage analysis, and digital divide data for US geographies.",
   "author": { "name": "cyanheads" },
   "repository": {
@@ -28,5 +28,26 @@
   },
   "tools_generated": true,
   "prompts_generated": true,
-  "user_config": {}
+  "user_config": {
+    "FCC_BDC_USERNAME": {
+      "type": "string",
+      "title": "FCC BDC Username",
+      "description": "FCC account email for BDC API. Required for fcc_list_downloads and BDC filing periods.",
+      "required": false
+    },
+    "FCC_BDC_HASH_VALUE": {
+      "type": "string",
+      "title": "FCC BDC API Token Hash",
+      "description": "API token hash from broadbandmap.fcc.gov Manage API Access page.",
+      "required": false,
+      "sensitive": true
+    },
+    "FCC_OPENDATA_APP_TOKEN": {
+      "type": "string",
+      "title": "FCC Open Data App Token",
+      "description": "Socrata app token for FCC Open Data. Increases rate limits; not required.",
+      "required": false,
+      "sensitive": true
+    }
+  }
 }

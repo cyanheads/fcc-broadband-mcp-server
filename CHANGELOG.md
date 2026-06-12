@@ -2,6 +2,10 @@
 
 All notable changes to this project. Each entry links to its full per-version file in [changelog/](changelog/).
 
+## [0.1.8](changelog/0.1.x/0.1.8.md) — 2026-06-12
+
+mcp-ts-core ^0.9.21 → ^0.10.6; in-code identity name/title; truncation enrichment on find_underserved and search_providers; MCPB bundle agent-doc strip; optional BDC/Open Data credential env vars.
+
 ## [0.1.7](changelog/0.1.x/0.1.7.md) — 2026-06-04
 
 Error contracts: migrate service-layer notFound throws to handler ctx.fail() with recovery hints (#9, #10); fix wrong error reason for missing geography_ids (#7).

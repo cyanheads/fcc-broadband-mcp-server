@@ -6,7 +6,7 @@
     "url": "https://github.com/cyanheads/fcc-broadband-mcp-server",
     "source": "github"
   },
-  "version": "0.1.7",
+  "version": "0.1.8",
   "remotes": [
     {
       "type": "streamable-http",
@@ -19,7 +19,7 @@
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "@cyanheads/fcc-broadband-mcp-server",
       "runtimeHint": "node",
-      "version": "0.1.7",
+      "version": "0.1.8",
       "packageArguments": [
         {
           "type": "positional",
@@ -31,6 +31,24 @@
         }
       ],
       "environmentVariables": [
+        {
+          "name": "FCC_BDC_USERNAME",
+          "description": "FCC account email for BDC API. Required for fcc_list_downloads and BDC filing periods.",
+          "format": "string",
+          "isRequired": false
+        },
+        {
+          "name": "FCC_BDC_HASH_VALUE",
+          "description": "API token hash from broadbandmap.fcc.gov Manage API Access page.",
+          "format": "string",
+          "isRequired": false
+        },
+        {
+          "name": "FCC_OPENDATA_APP_TOKEN",
+          "description": "Socrata app token for FCC Open Data. Increases rate limits; not required.",
+          "format": "string",
+          "isRequired": false
+        },
         {
           "name": "MCP_LOG_LEVEL",
           "description": "Sets the minimum log level for output (e.g., 'debug', 'info', 'warn').",
@@ -48,7 +66,7 @@
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "@cyanheads/fcc-broadband-mcp-server",
       "runtimeHint": "node",
-      "version": "0.1.7",
+      "version": "0.1.8",
       "packageArguments": [
         {
           "type": "positional",
@@ -60,6 +78,24 @@
         }
       ],
       "environmentVariables": [
+        {
+          "name": "FCC_BDC_USERNAME",
+          "description": "FCC account email for BDC API. Required for fcc_list_downloads and BDC filing periods.",
+          "format": "string",
+          "isRequired": false
+        },
+        {
+          "name": "FCC_BDC_HASH_VALUE",
+          "description": "API token hash from broadbandmap.fcc.gov Manage API Access page.",
+          "format": "string",
+          "isRequired": false
+        },
+        {
+          "name": "FCC_OPENDATA_APP_TOKEN",
+          "description": "Socrata app token for FCC Open Data. Increases rate limits; not required.",
+          "format": "string",
+          "isRequired": false
+        },
         {
           "name": "MCP_HTTP_HOST",
           "description": "The hostname for the HTTP server.",

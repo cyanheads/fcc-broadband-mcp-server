@@ -1,9 +1,10 @@
 # fcc-broadband-mcp-server - Directory Structure
 
-Generated on: 2026-06-02 14:14:51
+Generated on: 2026-06-12 07:38:37
 
 ```text
 fcc-broadband-mcp-server/
+├── .agents/
 ├── .claude/
 ├── .claude-plugin/
 │   └── plugin.json
@@ -32,6 +33,7 @@ fcc-broadband-mcp-server/
 │   ├── check-framework-antipatterns.ts
 │   ├── check-skill-versions.ts
 │   ├── check-skills-sync.ts
+│   ├── clean-mcpb.ts
 │   ├── clean.ts
 │   ├── devcheck.ts
 │   ├── lint-mcp.ts
@@ -117,6 +119,10 @@ fcc-broadband-mcp-server/
 │   ├── security-pass/
 │   │   └── SKILL.md
 │   ├── setup/
+│   │   └── SKILL.md
+│   ├── techniques/
+│   │   ├── references/
+│   │   │   └── outline-on-overflow.md
 │   │   └── SKILL.md
 │   └── tool-defs-analysis/
 │       └── SKILL.md
