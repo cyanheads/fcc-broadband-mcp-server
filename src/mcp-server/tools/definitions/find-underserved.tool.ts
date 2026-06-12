@@ -147,11 +147,20 @@ export const findUnderservedTool = tool('fcc_find_underserved', {
     dataVintage: z.string().describe('Data vintage — Form 477 data as of June 2021.'),
   }),
 
-  // Agent-facing success-path context: result count, applied filter echo, and empty-result notice.
+  // Agent-facing success-path context: result count, truncation disclosure, applied filter echo, and empty-result notice.
   enrichment: {
     totalFound: z
       .number()
       .describe('Total number of areas found before applying the limit filter.'),
+    truncated: z
+      .boolean()
+      .optional()
+      .describe('True when more areas matched than the limit returned. Absent when not truncated.'),
+    shown: z
+      .number()
+      .optional()
+      .describe('Number of areas returned after applying the limit. Present when truncated.'),
+    cap: z.number().optional().describe('The limit that was applied. Present when truncated.'),
     appliedFilters: z
       .object({
         state: z
@@ -238,6 +247,10 @@ export const findUnderservedTool = tool('fcc_find_underserved', {
       minUnservedPop: input.min_unserved_pop,
     };
     ctx.enrich({ totalFound, appliedFilters });
+
+    if (totalFound > input.limit) {
+      ctx.enrich.truncated({ shown: limited.length, cap: input.limit });
+    }
 
     if (limited.length === 0) {
       ctx.enrich.notice(

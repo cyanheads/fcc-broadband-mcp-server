@@ -71,8 +71,16 @@ export const searchProvidersTool = tool('fcc_search_providers', {
     dataVintage: z.string().describe('Data vintage — Form 477 data as of June 2021.'),
   }),
 
-  // Agent-facing success-path context: applied filter echo and empty-result notice.
+  // Agent-facing success-path context: truncation disclosure, applied filter echo, and empty-result notice.
   enrichment: {
+    truncated: z
+      .boolean()
+      .optional()
+      .describe(
+        'True when results were capped at the limit and more providers may exist. Absent when not capped.',
+      ),
+    shown: z.number().optional().describe('Number of providers returned. Present when capped.'),
+    cap: z.number().optional().describe('The limit that was applied. Present when capped.'),
     appliedFilters: z
       .object({
         nameSearch: z
@@ -148,6 +156,10 @@ export const searchProvidersTool = tool('fcc_search_providers', {
       ...(input.tech_filter?.length && { techFilter: input.tech_filter }),
     };
     ctx.enrich({ appliedFilters });
+
+    if (providers.length >= input.limit) {
+      ctx.enrich.truncated({ shown: providers.length, cap: input.limit });
+    }
 
     if (providers.length === 0) {
       const criteria = [

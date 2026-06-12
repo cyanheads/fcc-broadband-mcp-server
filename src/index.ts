@@ -16,6 +16,8 @@ import { initGeoApiService } from './services/geo-api/geo-api-service.js';
 import { initOpenDataService } from './services/open-data/open-data-service.js';
 
 await createApp({
+  name: 'fcc-broadband-mcp-server',
+  title: 'fcc-broadband-mcp-server',
   tools: [...allToolDefinitions],
   resources: [...allResourceDefinitions],
   prompts: [...allPromptDefinitions],
