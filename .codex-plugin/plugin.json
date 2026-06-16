@@ -1,5 +1,5 @@
 {
-  "name": "@cyanheads/fcc-broadband-mcp-server",
+  "name": "fcc-broadband-mcp-server",
   "version": "0.1.8",
   "description": "Access FCC broadband availability, coverage analysis, and digital divide data for US geographies and census blocks via MCP. STDIO or Streamable HTTP.",
   "author": {
@@ -13,7 +13,7 @@
   "keywords": ["mcp", "mcp-server", "model-context-protocol", "fcc", "broadband", "digital-divide"],
   "mcpServers": "./.codex-plugin/mcp.json",
   "interface": {
-    "displayName": "@cyanheads/fcc-broadband-mcp-server",
+    "displayName": "fcc-broadband-mcp-server",
     "shortDescription": "Query FCC broadband availability, coverage analysis, and digital-divide data for US geographies and census blocks via MCP.",
     "longDescription": "MCP server for FCC broadband data. Geocode coordinates to census blocks, query block-level provider availability and advertised speeds, and run geography-level coverage analysis — provider counts, unserved and underserved populations, area comparisons, and BEAD-eligibility lookups. Covers Form 477 (2015–2021) and Broadband Data Collection (2022+) datasets. STDIO and Streamable HTTP transports.",
     "developerName": "cyanheads",

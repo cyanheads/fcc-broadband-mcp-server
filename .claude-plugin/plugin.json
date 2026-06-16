@@ -1,5 +1,5 @@
 {
-  "name": "@cyanheads/fcc-broadband-mcp-server",
+  "name": "fcc-broadband-mcp-server",
   "version": "0.1.8",
   "description": "Access FCC broadband availability, coverage analysis, and digital divide data for US geographies and census blocks via MCP. STDIO or Streamable HTTP.",
   "author": {
@@ -9,7 +9,7 @@
   "repository": "https://github.com/cyanheads/fcc-broadband-mcp-server",
   "license": "Apache-2.0",
   "mcpServers": {
-    "@cyanheads/fcc-broadband-mcp-server": {
+    "fcc-broadband-mcp-server": {
       "command": "npx",
       "args": ["-y", "@cyanheads/fcc-broadband-mcp-server"],
       "env": {
