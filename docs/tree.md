@@ -1,6 +1,6 @@
 # fcc-broadband-mcp-server - Directory Structure
 
-Generated on: 2026-06-12 07:38:37
+Generated on: 2026-06-20 11:32:34
 
 ```text
 fcc-broadband-mcp-server/
@@ -29,6 +29,7 @@ fcc-broadband-mcp-server/
 ├── scripts/
 │   ├── build-changelog.ts
 │   ├── build.ts
+│   ├── check-dependency-specifiers.ts
 │   ├── check-docs-sync.ts
 │   ├── check-framework-antipatterns.ts
 │   ├── check-skill-versions.ts
