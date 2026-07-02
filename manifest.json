@@ -1,7 +1,7 @@
 {
   "manifest_version": "0.3",
   "name": "fcc-broadband-mcp-server",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "description": "FCC broadband availability, coverage analysis, and digital divide data for US geographies.",
   "author": { "name": "cyanheads" },
   "repository": {
@@ -48,6 +48,18 @@
       "description": "Socrata app token for FCC Open Data. Increases rate limits; not required.",
       "required": false,
       "sensitive": true
+    },
+    "FCC_MIRROR_ENABLED": {
+      "type": "string",
+      "title": "Form 477 Mirror Enabled",
+      "description": "Serve Form 477 queries from a local SQLite mirror when its coverage allows (bootstrap with `bun run mirror:init`). Default: false.",
+      "required": false
+    },
+    "FCC_MIRROR_PATH": {
+      "type": "string",
+      "title": "Form 477 Mirror Directory",
+      "description": "Directory holding the Form 477 mirror SQLite files. Default: data/fcc-mirror.",
+      "required": false
     }
   }
 }

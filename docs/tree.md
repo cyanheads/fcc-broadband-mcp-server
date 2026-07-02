@@ -1,6 +1,6 @@
 # fcc-broadband-mcp-server - Directory Structure
 
-Generated on: 2026-06-20 11:32:34
+Generated on: 2026-07-02 13:35:50
 
 ```text
 fcc-broadband-mcp-server/
@@ -37,6 +37,8 @@ fcc-broadband-mcp-server/
 │   ├── clean-mcpb.ts
 │   ├── clean.ts
 │   ├── devcheck.ts
+│   ├── fcc-mirror-init.ts
+│   ├── fcc-mirror-verify.ts
 │   ├── lint-mcp.ts
 │   ├── lint-packaging.ts
 │   ├── list-skills.ts
@@ -160,6 +162,12 @@ fcc-broadband-mcp-server/
 │   │   │   ├── geo-api-service.ts
 │   │   │   └── types.ts
 │   │   └── open-data/
+│   │       ├── mirror/
+│   │       │   ├── csv.ts
+│   │       │   ├── form477-mirror.ts
+│   │       │   ├── ingest.ts
+│   │       │   ├── state-fips.ts
+│   │       │   └── stores.ts
 │   │       ├── open-data-service.ts
 │   │       └── types.ts
 │   └── index.ts
@@ -168,6 +176,10 @@ fcc-broadband-mcp-server/
 │   ├── resources/
 │   │   ├── geography-summary.resource.test.ts
 │   │   └── providers-list.resource.test.ts
+│   ├── services/
+│   │   └── open-data/
+│   │       ├── form477-mirror.test.ts
+│   │       └── mirror-helpers.test.ts
 │   └── tools/
 │       ├── compare-areas.tool.test.ts
 │       ├── find-underserved.tool.test.ts

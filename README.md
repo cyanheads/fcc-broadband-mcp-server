@@ -7,7 +7,7 @@
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/Version-0.1.10-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/users/cyanheads/packages/container/package/fcc-broadband-mcp-server) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-^1.29.0-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![npm](https://img.shields.io/npm/v/@cyanheads/fcc-broadband-mcp-server?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@cyanheads/fcc-broadband-mcp-server) [![TypeScript](https://img.shields.io/badge/TypeScript-^6.0.3-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.3.0-blueviolet.svg?style=flat-square)](https://bun.sh/)
+[![Version](https://img.shields.io/badge/Version-0.1.11-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/users/cyanheads/packages/container/package/fcc-broadband-mcp-server) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-^1.29.0-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![npm](https://img.shields.io/npm/v/@cyanheads/fcc-broadband-mcp-server?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@cyanheads/fcc-broadband-mcp-server) [![TypeScript](https://img.shields.io/badge/TypeScript-^6.0.3-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.3.0-blueviolet.svg?style=flat-square)](https://bun.sh/)
 
 </div>
 
@@ -279,9 +279,43 @@ All configuration is validated at startup via Zod schemas in `src/config/`. Key 
 | `FCC_BDC_USERNAME` | FCC account email for BDC API. Without this, `fcc_list_downloads` and BDC-era `fcc_list_filing_periods` return a `credentials_required` error. | none |
 | `FCC_BDC_HASH_VALUE` | API token hash from broadbandmap.fcc.gov "Manage API Access". Paired with `FCC_BDC_USERNAME`. | none |
 | `FCC_OPENDATA_APP_TOKEN` | Socrata app token. Increases rate limits on Form 477 queries; not required for functionality. | none |
+| `FCC_MIRROR_ENABLED` | Serve Form 477 queries from a local SQLite mirror when its coverage allows (see [Local Form 477 mirror](#local-form-477-mirror-opt-in)). | `false` |
+| `FCC_MIRROR_PATH` | Directory holding the Form 477 mirror SQLite files. | `data/fcc-mirror` |
 | `OTEL_ENABLED` | Enable [OpenTelemetry instrumentation](https://github.com/cyanheads/mcp-ts-core/tree/main/docs/telemetry) | `false` |
 
 See [`.env.example`](./.env.example) for the full list of optional overrides.
+
+## Local Form 477 mirror (opt-in)
+
+The Form 477 corpus is frozen — June 2021 was the last filing period — so it can be mirrored locally once and served without touching the live Socrata API. The mirror is off by default; when disabled (or not yet bootstrapped), every tool behaves exactly as before.
+
+The corpus is large: ~78M block-level deployment rows and ~24M area-summary rows, roughly 9 GB of source data. A full ingest is an hours-scale one-time job, so the bootstrap is state-scoped — you can mirror just the states you query:
+
+```sh
+# Ingest specific states by 2-digit FIPS (e.g. 11 = DC, 53 = WA)
+bun run mirror:init -- --states 11,53
+
+# Or ingest the whole corpus (~9 GB download, hours)
+bun run mirror:init -- --full
+
+# Inspect coverage, row counts, and SQLite integrity
+bun run mirror:verify
+```
+
+Then set `FCC_MIRROR_ENABLED=true`. Serving rules:
+
+- Block/geography lookups (`fcc_search_availability`, `fcc_get_coverage_summary`, `fcc_compare_areas`, `fcc_find_underserved`) serve from the mirror when the queried state is fully ingested; anything else falls back to the live API silently.
+- Cross-state aggregations (`fcc_search_providers`, `fcc_get_provider`) and geographies whose GEOID embeds no state (cbsa, tribal, nation) serve from the mirror only after a `--full` ingest.
+
+One behavioral difference: provider name search (`fcc_search_providers`) uses word-prefix matching on the mirror (FTS5 — `comc` matches "Comcast") instead of the live API's arbitrary-substring match (`mcast` matches "Comcast" live but not on the mirror). Mid-word fragments may return fewer results from the mirror.
+
+The ingest is idempotent and resumable: already-covered states are skipped, and an interrupted run resumes from its persisted cursor. Set `FCC_OPENDATA_APP_TOKEN` before a full ingest to raise Socrata's rate limits. Under Bun the mirror uses the built-in `bun:sqlite`; under Node.js install the optional `better-sqlite3` peer dependency.
+
+In Docker, the image ships the lifecycle scripts and a writable `data/` directory:
+
+```sh
+docker exec <container> bun run mirror:init -- --states 11,53
+```
 
 ## Running the server
 

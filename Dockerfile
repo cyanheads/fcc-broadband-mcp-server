@@ -11,8 +11,10 @@ WORKDIR /usr/src/app
 # Copy dependency manifests for optimized layer caching
 COPY package.json bun.lock ./
 
-# Install all dependencies (including dev dependencies for building)
-RUN bun install --frozen-lockfile
+# Install all dependencies (including dev dependencies for building), ignoring
+# lifecycle scripts so the optional `better-sqlite3` native addon isn't compiled
+# here — the runtime image uses Bun's built-in `bun:sqlite` for the mirror.
+RUN bun install --frozen-lockfile --ignore-scripts
 
 # Copy the rest of the source code
 COPY . .
@@ -71,11 +73,28 @@ RUN if [ "$OTEL_ENABLED" = "true" ]; then \
 # Copy the compiled application code from the build stage
 COPY --from=build /usr/src/app/dist ./dist
 
+# Copy the Form 477 mirror lifecycle scripts so the opt-in bootstrap works
+# in-container (`docker exec <ctr> bun run mirror:init -- --states ...`).
+COPY --from=build /usr/src/app/scripts/fcc-mirror-init.ts \
+                  /usr/src/app/scripts/fcc-mirror-verify.ts \
+                  ./scripts/
+
+# Bun honors tsconfig `paths` at runtime — map `@/` to the compiled `./dist/`
+# so the mirror .ts scripts resolve their alias imports against the build
+# output. In a dev checkout the source tsconfig.json maps @/* → ./src/*; in the
+# image this emitted one maps @/* → ./dist/*. Same `bun run mirror:*` command
+# in both environments.
+RUN echo '{"compilerOptions":{"baseUrl":".","paths":{"@/*":["./dist/*"]}}}' > tsconfig.json
+
 # The 'oven/bun' image already provides a non-root user named 'bun'.
 # We will use this existing user for enhanced security.
 
 # Create and set permissions for the log directory, assigning ownership to the 'bun' user.
 RUN mkdir -p /var/log/fcc-broadband-mcp-server && chown -R bun:bun /var/log/fcc-broadband-mcp-server
+
+# Pre-create the mirror data directory (default FCC_MIRROR_PATH=data/fcc-mirror)
+# writable by the non-root user, so the opt-in mirror works in-container.
+RUN mkdir -p /usr/src/app/data && chown -R bun:bun /usr/src/app/data
 
 # Switch to the non-root user
 USER bun

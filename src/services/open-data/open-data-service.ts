@@ -11,6 +11,7 @@ import { serviceUnavailable } from '@cyanheads/mcp-ts-core/errors';
 import type { StorageService } from '@cyanheads/mcp-ts-core/storage';
 import { httpErrorFromResponse, withRetry } from '@cyanheads/mcp-ts-core/utils';
 import type { ServerConfig } from '@/config/server-config.js';
+import { Form477Mirror } from './mirror/form477-mirror.js';
 import {
   type AreaSegment,
   DATASET_IDS,
@@ -71,6 +72,18 @@ function accumulateAreaRows(rows: RawAreaRow[]): Map<
   return byId;
 }
 
+/** Sums the d_1..d_8 speed-tier location counts across provider summary rows. */
+function sumSpeedTiers(rows: RawProviderSummaryRow[]): Record<string, number> {
+  const tierTotals: Record<string, number> = {};
+  for (const row of rows) {
+    for (const tier of ['d_1', 'd_2', 'd_3', 'd_4', 'd_5', 'd_6', 'd_7', 'd_8'] as const) {
+      const val = parseInt(row[tier] ?? '0', 10);
+      tierTotals[tier] = (tierTotals[tier] ?? 0) + val;
+    }
+  }
+  return tierTotals;
+}
+
 /** Query parameters for a Socrata SoQL request. */
 interface SoqlParams {
   $group?: string;
@@ -87,7 +100,40 @@ export class OpenDataService {
     readonly config: AppConfig,
     readonly storage: StorageService,
     private readonly _serverConfig: ServerConfig,
+    /**
+     * Optional local Form 477 mirror (FCC_MIRROR_ENABLED). Each mirror method
+     * returns `undefined` when its coverage gate cannot authoritatively serve
+     * the request, in which case the live Socrata path runs unchanged.
+     */
+    private readonly _mirror?: Form477Mirror,
   ) {}
+
+  /**
+   * Run one mirror read. `undefined` — mirror disabled, coverage gate declined,
+   * or the mirror layer failed — means the caller serves live; any other value
+   * (including `null`) is authoritative. A mirror failure must degrade to the
+   * live API, never fail the tool, so errors are logged and swallowed here.
+   */
+  private async fromMirror<T>(
+    ctx: Context,
+    dataset: string,
+    read: (mirror: Form477Mirror) => Promise<T | undefined>,
+  ): Promise<T | undefined> {
+    if (!this._mirror) return;
+    try {
+      const result = await read(this._mirror);
+      if (result !== undefined) {
+        ctx.log.debug('Served from local Form 477 mirror', { dataset });
+      }
+      return result;
+    } catch (error) {
+      ctx.log.warning('Form 477 mirror read failed — serving live', {
+        dataset,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return;
+    }
+  }
 
   private buildUrl(datasetId: string, params: SoqlParams): string {
     const url = new URL(`${BASE_URL}/${datasetId}.json`);
@@ -174,28 +220,33 @@ export class OpenDataService {
     },
     ctx: Context,
   ): Promise<DeploymentRecord[]> {
-    const conditions: string[] = [`blockcode='${blockFips}'`];
-    if (options.techCodes?.length) {
-      const techList = options.techCodes.map((t) => `'${t}'`).join(',');
-      conditions.push(`techcode IN (${techList})`);
-    }
-    if (options.minSpeedDown !== undefined) {
-      conditions.push(`maxaddown>=${options.minSpeedDown}`);
-    }
-    if (options.consumer === true) {
-      conditions.push(`consumer='1'`);
-    } else if (options.consumer === false) {
-      conditions.push(`business='1'`);
-    }
-
-    const rows = await this.fetchAllPages<RawDeploymentRow>(
-      DATASET_IDS.DEPLOYMENT,
-      {
-        $where: conditions.join(' AND '),
-        $limit: DEFAULT_LIMIT,
-      },
-      ctx,
+    let rows = await this.fromMirror(ctx, 'deployment', (m) =>
+      m.deploymentByBlock(blockFips, options),
     );
+    if (!rows) {
+      const conditions: string[] = [`blockcode='${blockFips}'`];
+      if (options.techCodes?.length) {
+        const techList = options.techCodes.map((t) => `'${t}'`).join(',');
+        conditions.push(`techcode IN (${techList})`);
+      }
+      if (options.minSpeedDown !== undefined) {
+        conditions.push(`maxaddown>=${options.minSpeedDown}`);
+      }
+      if (options.consumer === true) {
+        conditions.push(`consumer='1'`);
+      } else if (options.consumer === false) {
+        conditions.push(`business='1'`);
+      }
+
+      rows = await this.fetchAllPages<RawDeploymentRow>(
+        DATASET_IDS.DEPLOYMENT,
+        {
+          $where: conditions.join(' AND '),
+          $limit: DEFAULT_LIMIT,
+        },
+        ctx,
+      );
+    }
 
     if (rows.length === 0) {
       return [];
@@ -232,28 +283,33 @@ export class OpenDataService {
   ): Promise<AreaSegment[]> {
     const geographyId = options.geographyType === 'nation' ? '0' : (options.geographyId ?? '');
 
-    const conditions: string[] = [
-      `type='${options.geographyType}'`,
-      `id='${geographyId}'`,
-      `tech='${options.techFilter}'`,
-      `speed='${options.speedDown}'`,
-    ];
-
-    if (options.urbanRuralFilter && options.urbanRuralFilter !== 'all') {
-      conditions.push(`urban_rural='${options.urbanRuralFilter}'`);
-    }
-    if (options.tribalFilter && options.tribalFilter !== 'all') {
-      conditions.push(`tribal_non='${options.tribalFilter}'`);
-    }
-
-    const rows = await this.fetchAllPages<RawAreaRow>(
-      DATASET_IDS.AREA_TABLE,
-      {
-        $where: conditions.join(' AND '),
-        $limit: 100,
-      },
-      ctx,
+    let rows = await this.fromMirror(ctx, 'area', (m) =>
+      m.areaSegments({ ...options, geographyId }),
     );
+    if (!rows) {
+      const conditions: string[] = [
+        `type='${options.geographyType}'`,
+        `id='${geographyId}'`,
+        `tech='${options.techFilter}'`,
+        `speed='${options.speedDown}'`,
+      ];
+
+      if (options.urbanRuralFilter && options.urbanRuralFilter !== 'all') {
+        conditions.push(`urban_rural='${options.urbanRuralFilter}'`);
+      }
+      if (options.tribalFilter && options.tribalFilter !== 'all') {
+        conditions.push(`tribal_non='${options.tribalFilter}'`);
+      }
+
+      rows = await this.fetchAllPages<RawAreaRow>(
+        DATASET_IDS.AREA_TABLE,
+        {
+          $where: conditions.join(' AND '),
+          $limit: 100,
+        },
+        ctx,
+      );
+    }
 
     if (rows.length === 0) {
       return [];
@@ -309,23 +365,26 @@ export class OpenDataService {
       total: number;
     }>
   > {
-    const idList = options.geographyIds.map((id) => `'${id}'`).join(',');
-    const conditions: string[] = [
-      `type='${options.geographyType}'`,
-      `id IN (${idList})`,
-      `tech='${options.techFilter}'`,
-      `speed='${options.speedDown}'`,
-    ];
+    let rows = await this.fromMirror(ctx, 'area', (m) => m.areaStatsBatch(options));
+    if (!rows) {
+      const idList = options.geographyIds.map((id) => `'${id}'`).join(',');
+      const conditions: string[] = [
+        `type='${options.geographyType}'`,
+        `id IN (${idList})`,
+        `tech='${options.techFilter}'`,
+        `speed='${options.speedDown}'`,
+      ];
 
-    const rows = await this.fetchAllPages<RawAreaRow>(
-      DATASET_IDS.AREA_TABLE,
-      {
-        $where: conditions.join(' AND '),
-        $limit: DEFAULT_LIMIT,
-      },
-      ctx,
-      MAX_LIMIT,
-    );
+      rows = await this.fetchAllPages<RawAreaRow>(
+        DATASET_IDS.AREA_TABLE,
+        {
+          $where: conditions.join(' AND '),
+          $limit: DEFAULT_LIMIT,
+        },
+        ctx,
+        MAX_LIMIT,
+      );
+    }
 
     const byId = accumulateAreaRows(rows);
     return Array.from(byId.values()).map((e) => ({
@@ -359,30 +418,36 @@ export class OpenDataService {
       total: number;
     }>
   > {
-    const conditions: string[] = [
-      `type='${options.geographyType}'`,
-      `tech='${options.techFilter}'`,
-      `speed='${options.speedDown}'`,
-    ];
-
-    if (options.urbanRuralFilter && options.urbanRuralFilter !== 'all') {
-      conditions.push(`urban_rural='${options.urbanRuralFilter}'`);
-    }
-
-    if (options.stateFipsPrefix) {
-      conditions.push(`id LIKE '${options.stateFipsPrefix}%'`);
-    }
-
     const maxRows = Math.min(options.limit ?? 10000, MAX_LIMIT);
-    const rows = await this.fetchAllPages<RawAreaRow>(
-      DATASET_IDS.AREA_TABLE,
-      {
-        $where: conditions.join(' AND '),
-        $limit: DEFAULT_LIMIT,
-      },
-      ctx,
-      maxRows,
+
+    let rows = await this.fromMirror(ctx, 'area', (m) =>
+      m.areaStatsByType({ ...options, maxRows }),
     );
+    if (!rows) {
+      const conditions: string[] = [
+        `type='${options.geographyType}'`,
+        `tech='${options.techFilter}'`,
+        `speed='${options.speedDown}'`,
+      ];
+
+      if (options.urbanRuralFilter && options.urbanRuralFilter !== 'all') {
+        conditions.push(`urban_rural='${options.urbanRuralFilter}'`);
+      }
+
+      if (options.stateFipsPrefix) {
+        conditions.push(`id LIKE '${options.stateFipsPrefix}%'`);
+      }
+
+      rows = await this.fetchAllPages<RawAreaRow>(
+        DATASET_IDS.AREA_TABLE,
+        {
+          $where: conditions.join(' AND '),
+          $limit: DEFAULT_LIMIT,
+        },
+        ctx,
+        maxRows,
+      );
+    }
 
     return Array.from(accumulateAreaRows(rows).values());
   }
@@ -399,27 +464,34 @@ export class OpenDataService {
     },
     ctx: Context,
   ): Promise<ProviderRecord[]> {
-    const conditions: string[] = [];
-    if (options.nameSearch) {
-      const escaped = options.nameSearch.replace(/'/g, "''");
-      conditions.push(`upper(holdingcompanyname) LIKE upper('%${escaped}%')`);
-    }
-    if (options.state) {
-      conditions.push(`stateabbr='${options.state}'`);
-    }
-    if (options.techCodes?.length) {
-      const techList = options.techCodes.map((t) => `'${t}'`).join(',');
-      conditions.push(`techcode IN (${techList})`);
-    }
+    const rowLimit = Math.min(options.limit ?? 50, 200) * 10;
 
-    const url = this.buildUrl(DATASET_IDS.DEPLOYMENT, {
-      $select: 'hoconum,holdingcompanyname,stateabbr,techcode',
-      $group: 'hoconum,holdingcompanyname,stateabbr,techcode',
-      ...(conditions.length > 0 ? { $where: conditions.join(' AND ') } : {}),
-      $limit: Math.min(options.limit ?? 50, 200) * 10,
-    });
+    let rows = await this.fromMirror(ctx, 'provider-dimension', (m) =>
+      m.searchProviders({ ...options, rowLimit }),
+    );
+    if (!rows) {
+      const conditions: string[] = [];
+      if (options.nameSearch) {
+        const escaped = options.nameSearch.replace(/'/g, "''");
+        conditions.push(`upper(holdingcompanyname) LIKE upper('%${escaped}%')`);
+      }
+      if (options.state) {
+        conditions.push(`stateabbr='${options.state}'`);
+      }
+      if (options.techCodes?.length) {
+        const techList = options.techCodes.map((t) => `'${t}'`).join(',');
+        conditions.push(`techcode IN (${techList})`);
+      }
 
-    const rows = await this.fetchJson<RawProviderRow>(url, ctx);
+      const url = this.buildUrl(DATASET_IDS.DEPLOYMENT, {
+        $select: 'hoconum,holdingcompanyname,stateabbr,techcode',
+        $group: 'hoconum,holdingcompanyname,stateabbr,techcode',
+        ...(conditions.length > 0 ? { $where: conditions.join(' AND ') } : {}),
+        $limit: rowLimit,
+      });
+
+      rows = await this.fetchJson<RawProviderRow>(url, ctx);
+    }
 
     const byHoconum = new Map<
       string,
@@ -466,6 +538,19 @@ export class OpenDataService {
     techCodes: string[];
     speedTierLocations: Record<string, number>;
   } | null> {
+    const fromMirror = await this.fromMirror(ctx, 'provider-summary', (m) =>
+      m.providerSummary(hoconum),
+    );
+    if (fromMirror !== undefined) {
+      if (fromMirror === null) return null;
+      return {
+        hoconum,
+        holdingCompanyName: fromMirror.holdingCompanyName,
+        techCodes: fromMirror.techCodes,
+        speedTierLocations: sumSpeedTiers(fromMirror.summaryRows),
+      };
+    }
+
     const nameUrl = this.buildUrl(DATASET_IDS.DEPLOYMENT, {
       $select: 'hoconum,holdingcompanyname',
       $where: `hoconum='${hoconum}'`,
@@ -497,15 +582,12 @@ export class OpenDataService {
 
     const summaryRows = await this.fetchJson<RawProviderSummaryRow>(summaryUrl, ctx);
 
-    const tierTotals: Record<string, number> = {};
-    for (const row of summaryRows) {
-      for (const tier of ['d_1', 'd_2', 'd_3', 'd_4', 'd_5', 'd_6', 'd_7', 'd_8'] as const) {
-        const val = parseInt(row[tier] ?? '0', 10);
-        tierTotals[tier] = (tierTotals[tier] ?? 0) + val;
-      }
-    }
-
-    return { hoconum, holdingCompanyName, techCodes, speedTierLocations: tierTotals };
+    return {
+      hoconum,
+      holdingCompanyName,
+      techCodes,
+      speedTierLocations: sumSpeedTiers(summaryRows),
+    };
   }
 
   /**
@@ -513,6 +595,12 @@ export class OpenDataService {
    */
   async getGeographyName(type: string, id: string, ctx: Context): Promise<string | undefined> {
     const geoId = type === 'nation' ? '0' : id;
+
+    const fromMirror = await this.fromMirror(ctx, 'geography', (m) => m.geographyName(type, geoId));
+    if (fromMirror) {
+      return fromMirror.value;
+    }
+
     const url = this.buildUrl(DATASET_IDS.GEOGRAPHY_LOOKUP, {
       $where: `geoid='${geoId}' AND type='${type}'`,
       $select: 'geoid,type,name',
@@ -533,6 +621,12 @@ export class OpenDataService {
     if (ids.length === 0) {
       return new Map();
     }
+
+    const fromMirror = await this.fromMirror(ctx, 'geography', (m) => m.geographyNames(type, ids));
+    if (fromMirror) {
+      return fromMirror;
+    }
+
     const idList = ids.map((id) => `'${id}'`).join(',');
     const rows = await this.fetchAllPages<RawGeographyRow>(
       DATASET_IDS.GEOGRAPHY_LOOKUP,
@@ -585,7 +679,13 @@ export function initOpenDataService(
   storage: StorageService,
   serverConfig: ServerConfig,
 ): void {
-  _service = new OpenDataService(config, storage, serverConfig);
+  // Construction is side-effect-free (nothing opens until a coverage check on
+  // the first Form 477 request), so a disabled or unpopulated mirror costs
+  // nothing at startup.
+  const mirror = serverConfig.mirrorEnabled
+    ? new Form477Mirror(serverConfig.mirrorPath)
+    : undefined;
+  _service = new OpenDataService(config, storage, serverConfig, mirror);
 }
 
 export function getOpenDataService(): OpenDataService {

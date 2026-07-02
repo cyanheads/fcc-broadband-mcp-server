@@ -6,7 +6,7 @@
     "url": "https://github.com/cyanheads/fcc-broadband-mcp-server",
     "source": "github"
   },
-  "version": "0.1.10",
+  "version": "0.1.11",
   "remotes": [
     {
       "type": "streamable-http",
@@ -19,7 +19,7 @@
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "@cyanheads/fcc-broadband-mcp-server",
       "runtimeHint": "node",
-      "version": "0.1.10",
+      "version": "0.1.11",
       "packageArguments": [
         {
           "type": "positional",
@@ -50,6 +50,20 @@
           "isRequired": false
         },
         {
+          "name": "FCC_MIRROR_ENABLED",
+          "description": "Serve Form 477 queries from a local SQLite mirror when its coverage allows (bootstrap with `bun run mirror:init`). Default: false.",
+          "format": "string",
+          "isRequired": false,
+          "default": "false"
+        },
+        {
+          "name": "FCC_MIRROR_PATH",
+          "description": "Directory holding the Form 477 mirror SQLite files.",
+          "format": "string",
+          "isRequired": false,
+          "default": "data/fcc-mirror"
+        },
+        {
           "name": "MCP_LOG_LEVEL",
           "description": "Sets the minimum log level for output (e.g., 'debug', 'info', 'warn').",
           "format": "string",
@@ -66,7 +80,7 @@
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "@cyanheads/fcc-broadband-mcp-server",
       "runtimeHint": "node",
-      "version": "0.1.10",
+      "version": "0.1.11",
       "packageArguments": [
         {
           "type": "positional",
@@ -95,6 +109,20 @@
           "description": "Socrata app token for FCC Open Data. Increases rate limits; not required.",
           "format": "string",
           "isRequired": false
+        },
+        {
+          "name": "FCC_MIRROR_ENABLED",
+          "description": "Serve Form 477 queries from a local SQLite mirror when its coverage allows (bootstrap with `bun run mirror:init`). Default: false.",
+          "format": "string",
+          "isRequired": false,
+          "default": "false"
+        },
+        {
+          "name": "FCC_MIRROR_PATH",
+          "description": "Directory holding the Form 477 mirror SQLite files.",
+          "format": "string",
+          "isRequired": false,
+          "default": "data/fcc-mirror"
         },
         {
           "name": "MCP_HTTP_HOST",

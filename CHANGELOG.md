@@ -2,6 +2,10 @@
 
 All notable changes to this project. Each entry links to its full per-version file in [changelog/](changelog/).
 
+## [0.1.11](changelog/0.1.x/0.1.11.md) — 2026-07-02
+
+Opt-in local SQLite mirror of the frozen Form 477 corpus: state-scoped ingest via mirror:init/mirror:verify, coverage-gated serving with silent live-API fallback, FTS5 provider search, and FCC_MIRROR_ENABLED/FCC_MIRROR_PATH config.
+
 ## [0.1.10](changelog/0.1.x/0.1.10.md) — 2026-07-02 · 🛡️ Security
 
 Fail-fast GEOID shape validation on fcc_get_coverage_summary and fcc_compare_areas, batched GEOID→name resolution in fcc_find_underserved and fcc_compare_areas output, mcp-ts-core ^0.10.10, and a lock refresh clearing 8 transitive advisories (hono, js-yaml).
