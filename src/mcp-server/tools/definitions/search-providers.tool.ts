@@ -128,6 +128,14 @@ export const searchProvidersTool = tool('fcc_search_providers', {
       recovery:
         'Try a shorter name fragment, remove state or technology filters, or verify state abbreviation is uppercase (e.g., "WA").',
     },
+    {
+      reason: 'live_search_timeout',
+      code: JsonRpcErrorCode.Timeout,
+      retryable: false,
+      when: 'The live grouped provider query against FCC Open Data exceeded its 30-second budget — the failure is load-bound by the input, so it is not retried.',
+      recovery:
+        'Add a state filter or use a longer, more specific name fragment. Operators can enable the local Form 477 mirror (FCC_MIRROR_ENABLED=true) to serve provider searches locally.',
+    },
   ],
 
   async handler(input, ctx) {

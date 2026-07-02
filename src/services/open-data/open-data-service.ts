@@ -7,7 +7,7 @@
 
 import type { Context } from '@cyanheads/mcp-ts-core';
 import type { AppConfig } from '@cyanheads/mcp-ts-core/config';
-import { serviceUnavailable } from '@cyanheads/mcp-ts-core/errors';
+import { JsonRpcErrorCode, McpError, serviceUnavailable } from '@cyanheads/mcp-ts-core/errors';
 import type { StorageService } from '@cyanheads/mcp-ts-core/storage';
 import { httpErrorFromResponse, withRetry } from '@cyanheads/mcp-ts-core/utils';
 import type { ServerConfig } from '@/config/server-config.js';
@@ -148,7 +148,22 @@ export class OpenDataService {
     return url.toString();
   }
 
-  private fetchJson<T>(url: string, ctx: Context): Promise<T[]> {
+  /**
+   * Fetches and parses one Socrata JSON response with a 30s deadline and retry.
+   *
+   * A deadline abort is classified into an `McpError(Timeout)` at this choke
+   * point — the raw `AbortError` thrown by fetch is a non-`McpError`, which
+   * `withRetry`'s default predicate always treats as transient. By default the
+   * classified error keeps the transient `Timeout` code (retries preserved for
+   * cheap point queries hitting a Socrata hiccup); callers running known
+   * load-bound queries pass `timeoutError` to fail fast with
+   * `data.retryable: false` and an actionable recovery hint.
+   */
+  private fetchJson<T>(
+    url: string,
+    ctx: Context,
+    opts?: { timeoutError?: () => McpError },
+  ): Promise<T[]> {
     return withRetry(
       async () => {
         const controller = new AbortController();
@@ -160,6 +175,20 @@ export class OpenDataService {
         let response: Response;
         try {
           response = await fetch(url, { signal });
+        } catch (error) {
+          // Deadline abort (our controller, not client cancellation) — classify.
+          if (controller.signal.aborted && !ctx.signal?.aborted) {
+            throw (
+              opts?.timeoutError?.() ??
+              new McpError(
+                JsonRpcErrorCode.Timeout,
+                `FCC Open Data request timed out after ${TIMEOUT_MS / 1000}s.`,
+                undefined,
+                { cause: error },
+              )
+            );
+          }
+          throw error;
         } finally {
           clearTimeout(timeoutId);
         }
@@ -464,7 +493,8 @@ export class OpenDataService {
     },
     ctx: Context,
   ): Promise<ProviderRecord[]> {
-    const rowLimit = Math.min(options.limit ?? 50, 200) * 10;
+    const baseLimit = Math.min(options.limit ?? 50, 200);
+    const rowLimit = baseLimit * 10;
 
     let rows = await this.fromMirror(ctx, 'provider-dimension', (m) =>
       m.searchProviders({ ...options, rowLimit }),
@@ -487,10 +517,37 @@ export class OpenDataService {
         $select: 'hoconum,holdingcompanyname,stateabbr,techcode',
         $group: 'hoconum,holdingcompanyname,stateabbr,techcode',
         ...(conditions.length > 0 ? { $where: conditions.join(' AND ') } : {}),
-        $limit: rowLimit,
+        /*
+         * Socrata's GROUP BY over the 78M-row deployment table short-circuits
+         * once $limit groups are found — measured live 2026-07-02:
+         * '%communications%' at $limit=50 completes in ~7s while $limit=500
+         * exceeds 55s. Name searches drop the 10x grouped-row headroom to stay
+         * inside the 30s budget; the tradeoff is partial statesServed/techCodes
+         * coverage per provider on the live path (the mirror is unaffected).
+         */
+        $limit: options.nameSearch ? baseLimit : rowLimit,
       });
 
-      rows = await this.fetchJson<RawProviderRow>(url, ctx);
+      /*
+       * This grouped query is load-bound by the input (match density decides
+       * whether the scan short-circuits), so a deadline timeout is
+       * deterministic — mark it non-retryable so withRetry fails once instead
+       * of amplifying a ~30s failure 4x (~2min wall clock, issue #14).
+       */
+      rows = await this.fetchJson<RawProviderRow>(url, ctx, {
+        timeoutError: () =>
+          new McpError(
+            JsonRpcErrorCode.Timeout,
+            `FCC Open Data provider search timed out after ${TIMEOUT_MS / 1000}s — the grouped query over the 78M-row deployment table cannot complete for this input, and retrying will not help.`,
+            {
+              reason: 'live_search_timeout',
+              retryable: false,
+              recovery: {
+                hint: 'Add a state filter or use a longer, more specific name fragment. Operators can enable the local Form 477 mirror (FCC_MIRROR_ENABLED=true) to serve provider searches locally.',
+              },
+            },
+          ),
+      });
     }
 
     const byHoconum = new Map<

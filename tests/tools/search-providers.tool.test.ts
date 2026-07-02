@@ -3,6 +3,7 @@
  * @module tests/tools/search-providers.tool.test
  */
 
+import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
 import { createMockContext, getEnrichment } from '@cyanheads/mcp-ts-core/testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { searchProvidersTool } from '@/mcp-server/tools/definitions/search-providers.tool.js';
@@ -94,6 +95,13 @@ describe('searchProvidersTool', () => {
     expect(text).toContain('130152');
     expect(text).toContain('Comcast');
     expect(text).toContain('1');
+  });
+
+  it('declares the non-retryable live_search_timeout contract entry', () => {
+    const entry = searchProvidersTool.errors?.find((e) => e.reason === 'live_search_timeout');
+    expect(entry).toBeDefined();
+    expect(entry?.code).toBe(JsonRpcErrorCode.Timeout);
+    expect(entry?.retryable).toBe(false);
   });
 
   it('formats empty provider list with fallback text', () => {
