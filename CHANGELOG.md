@@ -2,6 +2,10 @@
 
 All notable changes to this project. Each entry links to its full per-version file in [changelog/](changelog/).
 
+## [0.1.12](changelog/0.1.x/0.1.12.md) — 2026-07-02
+
+fcc_search_providers no longer retries its deterministic live GROUP BY timeout 4x — deadline aborts are classified as McpError(Timeout), the grouped query fails once with a non-retryable live_search_timeout and a recovery hint, and name searches drop the 10x grouped-row headroom.
+
 ## [0.1.11](changelog/0.1.x/0.1.11.md) — 2026-07-02
 
 Opt-in local SQLite mirror of the frozen Form 477 corpus: state-scoped ingest via mirror:init/mirror:verify, coverage-gated serving with silent live-API fallback, FTS5 provider search, and FCC_MIRROR_ENABLED/FCC_MIRROR_PATH config.

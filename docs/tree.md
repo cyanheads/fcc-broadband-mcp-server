@@ -1,6 +1,6 @@
 # fcc-broadband-mcp-server - Directory Structure
 
-Generated on: 2026-07-02 13:35:50
+Generated on: 2026-07-02 14:28:41
 
 ```text
 fcc-broadband-mcp-server/
@@ -179,7 +179,8 @@ fcc-broadband-mcp-server/
 │   ├── services/
 │   │   └── open-data/
 │   │       ├── form477-mirror.test.ts
-│   │       └── mirror-helpers.test.ts
+│   │       ├── mirror-helpers.test.ts
+│   │       └── open-data-service.test.ts
 │   └── tools/
 │       ├── compare-areas.tool.test.ts
 │       ├── find-underserved.tool.test.ts
