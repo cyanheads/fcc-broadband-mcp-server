@@ -6,6 +6,7 @@
 import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
 import { getOpenDataService } from '@/services/open-data/open-data-service.js';
+import { geoidShapeError } from '@/services/open-data/types.js';
 
 export const getCoverageSummaryTool = tool('fcc_get_coverage_summary', {
   title: 'Get Broadband Coverage Summary',
@@ -26,7 +27,7 @@ export const getCoverageSummaryTool = tool('fcc_get_coverage_summary', {
       .string()
       .optional()
       .describe(
-        'FIPS GEOID for the geography. State: 2-digit (e.g., "06" for California). County: 5-digit (e.g., "06037" for LA County). Congressional district: 4-digit state+district (e.g., "0601"). CBSA: 5-digit code. Omit for nation-level queries.',
+        'FIPS GEOID for the geography. State: 2-digit (e.g., "06" for California). County: 5-digit (e.g., "06037" for LA County). Congressional district: 4-digit state+district (e.g., "0601"). CBSA: 5-digit code. Place: 7-digit state+place (e.g., "0644000"). Omit for nation-level queries.',
       ),
     tech_filter: z
       .enum(['acfosw', 'f', 'c', 'a', 'o', 's', 'w'])
@@ -153,6 +154,13 @@ export const getCoverageSummaryTool = tool('fcc_get_coverage_summary', {
       recovery:
         'Omit geography_id for nation-level queries, or provide it for all other geography types.',
     },
+    {
+      reason: 'invalid_geography_id_shape',
+      code: JsonRpcErrorCode.ValidationError,
+      when: 'geography_id digit count does not match the geography_type (state=2, county=5, cd=4, cbsa=5, place=7).',
+      recovery:
+        'Use the digit count the geography_type expects: state=2, county=5, cd=4, cbsa=5, place=7. A 5-digit county FIPS starts with its 2-digit state prefix.',
+    },
   ],
 
   async handler(input, ctx) {
@@ -170,6 +178,14 @@ export const getCoverageSummaryTool = tool('fcc_get_coverage_summary', {
         'geography_id should be omitted for nation-level queries',
         { ...ctx.recoveryFor('invalid_geography_combo') },
       );
+    }
+    if (input.geography_id) {
+      const shapeError = geoidShapeError(input.geography_type, input.geography_id);
+      if (shapeError) {
+        throw ctx.fail('invalid_geography_id_shape', shapeError, {
+          ...ctx.recoveryFor('invalid_geography_id_shape'),
+        });
+      }
     }
 
     ctx.log.info('fcc_get_coverage_summary', {

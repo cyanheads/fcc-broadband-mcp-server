@@ -524,6 +524,36 @@ export class OpenDataService {
   }
 
   /**
+   * Resolves multiple GEOIDs to human-readable names in a single query against
+   * the geography lookup table, using the same `id IN (...)` batching pattern
+   * as getAreaStatsBatch. Returns a GEOID → name map; IDs without a lookup
+   * match are simply absent from the map.
+   */
+  async getGeographyNames(type: string, ids: string[], ctx: Context): Promise<Map<string, string>> {
+    if (ids.length === 0) {
+      return new Map();
+    }
+    const idList = ids.map((id) => `'${id}'`).join(',');
+    const rows = await this.fetchAllPages<RawGeographyRow>(
+      DATASET_IDS.GEOGRAPHY_LOOKUP,
+      {
+        $where: `type='${type}' AND geoid IN (${idList})`,
+        $select: 'geoid,type,name',
+        $limit: DEFAULT_LIMIT,
+      },
+      ctx,
+    );
+
+    const names = new Map<string, string>();
+    for (const r of rows) {
+      if (r.geoid && r.name) {
+        names.set(r.geoid, r.name);
+      }
+    }
+    return names;
+  }
+
+  /**
    * Lists all distinct holding companies with hoconum identifiers.
    * Queries the smaller provider_summary table (7K rows, ~0.5s) instead of the full
    * deployment table (5M rows) which causes GROUP BY timeouts.

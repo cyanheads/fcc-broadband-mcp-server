@@ -15,6 +15,38 @@ export const DATASET_IDS = {
   GEOGRAPHY_LOOKUP: 'v5vt-e7vw',
 } as const;
 
+/**
+ * Expected FIPS GEOID digit length per geography type. Single source for the
+ * shape rules so the tools sharing geoidShapeError cannot drift. `nation` (no
+ * ID) and `tribal` (heterogeneous BIA area IDs) are deliberately absent.
+ */
+const GEOID_DIGIT_LENGTHS: Record<string, number> = {
+  state: 2,
+  county: 5,
+  cd: 4,
+  cbsa: 5,
+  place: 7,
+};
+
+/**
+ * Validates a GEOID's shape against its geography type. Returns a targeted,
+ * correction-bearing message on mismatch, or undefined when the shape is valid
+ * or the type has no shape rule (`nation`, `tribal`). Does not verify the
+ * GEOID exists — existence stays an upstream lookup concern.
+ */
+export function geoidShapeError(geographyType: string, geographyId: string): string | undefined {
+  const expected = GEOID_DIGIT_LENGTHS[geographyType];
+  if (expected === undefined) return;
+  if (geographyId.length === expected && /^\d+$/.test(geographyId)) return;
+  if (geographyType === 'state' && /^\d{5}$/.test(geographyId)) {
+    return `geography_id "${geographyId}" is 5 digits — that's a county FIPS. For geography_type="state" use the 2-digit state prefix ("${geographyId.slice(0, 2)}"), or set geography_type="county".`;
+  }
+  const actual = /^\d+$/.test(geographyId)
+    ? `is ${geographyId.length} digits`
+    : 'is not all digits';
+  return `geography_id "${geographyId}" ${actual} — geography_type="${geographyType}" expects a ${expected}-digit FIPS GEOID.`;
+}
+
 /** Raw row from the deployment table (jdr4-3q4p). Socrata returns all fields as strings. */
 export interface RawDeploymentRow {
   blockcode?: string;

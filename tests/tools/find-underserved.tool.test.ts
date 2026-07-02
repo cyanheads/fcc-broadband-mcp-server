@@ -8,9 +8,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { findUnderservedTool } from '@/mcp-server/tools/definitions/find-underserved.tool.js';
 
 const mockGetAreaStatsByType = vi.fn();
+const mockGetGeographyNames = vi.fn();
 
 vi.mock('@/services/open-data/open-data-service.js', () => ({
-  getOpenDataService: () => ({ getAreaStatsByType: mockGetAreaStatsByType }),
+  getOpenDataService: () => ({
+    getAreaStatsByType: mockGetAreaStatsByType,
+    getGeographyNames: mockGetGeographyNames,
+  }),
 }));
 
 const MOCK_STATS = [
@@ -44,6 +48,7 @@ describe('findUnderservedTool', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockGetAreaStatsByType.mockResolvedValue(MOCK_STATS);
+    mockGetGeographyNames.mockResolvedValue(new Map());
   });
 
   it('returns underserved areas ranked by noCoverage descending', async () => {
@@ -106,6 +111,61 @@ describe('findUnderservedTool', () => {
     await findUnderservedTool.handler(input, ctx);
     const callArgs = mockGetAreaStatsByType.mock.calls[0][0] as Record<string, unknown>;
     expect(callArgs.stateFipsPrefix).toBeUndefined();
+  });
+
+  it('resolves geography names for returned rows only (post-limit)', async () => {
+    mockGetGeographyNames.mockResolvedValue(new Map([['28049', 'Hinds County, MS']]));
+    const ctx = createMockContext({ errors: findUnderservedTool.errors });
+    const input = findUnderservedTool.input.parse({
+      geography_type: 'county',
+      limit: 1,
+    });
+    const result = await findUnderservedTool.handler(input, ctx);
+    expect(result.areas[0].name).toBe('Hinds County, MS');
+    expect(mockGetGeographyNames).toHaveBeenCalledWith('county', ['28049'], expect.anything());
+  });
+
+  it('omits name for a GEOID with no lookup match', async () => {
+    mockGetGeographyNames.mockResolvedValue(new Map([['28049', 'Hinds County, MS']]));
+    const ctx = createMockContext({ errors: findUnderservedTool.errors });
+    const input = findUnderservedTool.input.parse({ geography_type: 'county' });
+    const result = await findUnderservedTool.handler(input, ctx);
+    expect(result.areas[0].name).toBe('Hinds County, MS');
+    expect(result.areas[1].name).toBeUndefined();
+  });
+
+  it('succeeds without names when name resolution fails', async () => {
+    mockGetGeographyNames.mockRejectedValue(new Error('lookup unavailable'));
+    const ctx = createMockContext({ errors: findUnderservedTool.errors });
+    const input = findUnderservedTool.input.parse({ geography_type: 'county' });
+    const result = await findUnderservedTool.handler(input, ctx);
+    expect(result.areas).toHaveLength(3);
+    expect(result.areas.every((a) => a.name === undefined)).toBe(true);
+  });
+
+  it('renders resolved names in the format table', () => {
+    const output = {
+      areas: [
+        {
+          id: '28049',
+          name: 'Hinds County, MS',
+          rank: 1,
+          noCoverage: 30000,
+          oneProvider: 20000,
+          total: 56000,
+          unservedPct: 53.6,
+          coveragePct: 46.4,
+        },
+      ],
+      geographyType: 'county',
+      speedDownMbps: 25,
+      urbanRuralFilter: 'R',
+      dataVintage: 'June 2021 (last Form 477 filing period)',
+    };
+    const blocks = findUnderservedTool.format!(output);
+    const text = (blocks[0] as { text: string }).text;
+    expect(text).toContain('Name (GEOID)');
+    expect(text).toContain('Hinds County, MS (28049)');
   });
 
   it('formats output with rank, unserved, and oneProvider columns', () => {

@@ -127,6 +127,10 @@ export const findUnderservedTool = tool('fcc_find_underserved', {
         z
           .object({
             id: z.string().describe('FIPS GEOID of the geography.'),
+            name: z
+              .string()
+              .optional()
+              .describe('Human-readable geography name if resolved (e.g., "Pontotoc County, MS").'),
             rank: z.number().describe('Rank by unserved population (1 = most unserved).'),
             noCoverage: z
               .number()
@@ -265,11 +269,23 @@ export const findUnderservedTool = tool('fcc_find_underserved', {
       };
     }
 
+    // Resolve GEOIDs to names for the returned rows only (post-ranking, post-limit)
+    // in one batched lookup; a resolution failure never fails the call.
+    const names = await service
+      .getGeographyNames(
+        input.geography_type,
+        limited.map((s) => s.id),
+        ctx,
+      )
+      .catch(() => new Map<string, string>());
+
     const areas = limited.map((s, i) => {
       const coveragePct = s.total > 0 ? ((s.total - s.noCoverage) / s.total) * 100 : 0;
       const unservedPct = s.total > 0 ? (s.noCoverage / s.total) * 100 : 0;
+      const name = names.get(s.id);
       return {
         id: s.id,
+        ...(name && { name }),
         rank: i + 1,
         noCoverage: s.noCoverage,
         oneProvider: s.oneProvider,
@@ -308,12 +324,15 @@ export const findUnderservedTool = tool('fcc_find_underserved', {
     } else {
       lines.push(
         '',
-        `| Rank | GEOID | Total Pop | No Coverage | 1 Provider | Unserved% | Coverage% |`,
+        `| Rank | Name (GEOID) | Total Pop | No Coverage | 1 Provider | Unserved% | Coverage% |`,
       );
-      lines.push(`|:-----|:------|:----------|:------------|:-----------|:----------|:----------|`);
+      lines.push(
+        `|:-----|:-------------|:----------|:------------|:-----------|:----------|:----------|`,
+      );
       for (const a of result.areas) {
+        const geoLabel = a.name ? `${a.name} (${a.id})` : a.id;
         lines.push(
-          `| ${a.rank} | ${a.id} | ${a.total.toLocaleString()} | ${a.noCoverage.toLocaleString()} | ${a.oneProvider.toLocaleString()} | ${a.unservedPct}% | ${a.coveragePct}% |`,
+          `| ${a.rank} | ${geoLabel} | ${a.total.toLocaleString()} | ${a.noCoverage.toLocaleString()} | ${a.oneProvider.toLocaleString()} | ${a.unservedPct}% | ${a.coveragePct}% |`,
         );
       }
     }

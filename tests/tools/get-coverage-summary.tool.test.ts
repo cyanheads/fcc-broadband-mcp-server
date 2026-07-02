@@ -89,6 +89,83 @@ describe('getCoverageSummaryTool', () => {
     });
   });
 
+  it('rejects a county FIPS passed as state with the cross-hint, before any service call', async () => {
+    const ctx = createMockContext({ errors: getCoverageSummaryTool.errors });
+    const input = getCoverageSummaryTool.input.parse({
+      geography_type: 'state',
+      geography_id: '06037',
+    });
+    await expect(getCoverageSummaryTool.handler(input, ctx)).rejects.toMatchObject({
+      code: JsonRpcErrorCode.ValidationError,
+      data: { reason: 'invalid_geography_id_shape' },
+      message: expect.stringContaining('county FIPS'),
+    });
+    await expect(getCoverageSummaryTool.handler(input, ctx)).rejects.toMatchObject({
+      message: expect.stringContaining('"06"'),
+    });
+    expect(mockGetAreaSegments).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['state', '0601'],
+    ['county', '06'],
+    ['cd', '06037'],
+    ['cbsa', '310'],
+    ['place', '06440'],
+  ])('throws invalid_geography_id_shape for geography_type="%s" with mis-shaped id "%s"', async (geographyType, geographyId) => {
+    const ctx = createMockContext({ errors: getCoverageSummaryTool.errors });
+    const input = getCoverageSummaryTool.input.parse({
+      geography_type: geographyType,
+      geography_id: geographyId,
+    });
+    await expect(getCoverageSummaryTool.handler(input, ctx)).rejects.toMatchObject({
+      code: JsonRpcErrorCode.ValidationError,
+      data: { reason: 'invalid_geography_id_shape' },
+    });
+    expect(mockGetAreaSegments).not.toHaveBeenCalled();
+  });
+
+  it('throws invalid_geography_id_shape for a non-numeric geography_id', async () => {
+    const ctx = createMockContext({ errors: getCoverageSummaryTool.errors });
+    const input = getCoverageSummaryTool.input.parse({
+      geography_type: 'state',
+      geography_id: 'CA',
+    });
+    await expect(getCoverageSummaryTool.handler(input, ctx)).rejects.toMatchObject({
+      code: JsonRpcErrorCode.ValidationError,
+      data: { reason: 'invalid_geography_id_shape' },
+      message: expect.stringContaining('not all digits'),
+    });
+  });
+
+  it.each([
+    ['state', '06'],
+    ['county', '06037'],
+    ['cd', '0601'],
+    ['cbsa', '31080'],
+    ['place', '0644000'],
+  ])('accepts geography_type="%s" with well-shaped id "%s"', async (geographyType, geographyId) => {
+    const ctx = createMockContext({ errors: getCoverageSummaryTool.errors });
+    const input = getCoverageSummaryTool.input.parse({
+      geography_type: geographyType,
+      geography_id: geographyId,
+    });
+    const result = await getCoverageSummaryTool.handler(input, ctx);
+    expect(result.geography.id).toBe(geographyId);
+    expect(mockGetAreaSegments).toHaveBeenCalled();
+  });
+
+  it('leaves tribal geography_id unvalidated', async () => {
+    const ctx = createMockContext({ errors: getCoverageSummaryTool.errors });
+    const input = getCoverageSummaryTool.input.parse({
+      geography_type: 'tribal',
+      geography_id: 'T010',
+    });
+    const result = await getCoverageSummaryTool.handler(input, ctx);
+    expect(result.geography.id).toBe('T010');
+    expect(mockGetAreaSegments).toHaveBeenCalled();
+  });
+
   it('throws geography_not_found when service returns empty segments', async () => {
     mockGetAreaSegments.mockResolvedValue([]);
     const ctx = createMockContext({ errors: getCoverageSummaryTool.errors });

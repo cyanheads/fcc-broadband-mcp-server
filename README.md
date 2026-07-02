@@ -85,6 +85,7 @@ Rank geographies by broadband access metrics to identify where underservice is w
 - Compare up to 50 geographies of the same type, or all 50 states + DC via `compare_all_states: true`
 - Sort by unserved population share, raw unserved headcount (useful for BEAD funding allocation), coverage rate, or competitive share
 - Returns a ranked table with per-geography population and coverage metrics
+- Each row includes the resolved geography name alongside its GEOID when available
 
 ---
 
@@ -97,6 +98,7 @@ Find the most broadband-underserved areas within a state or nationwide.
 - Default filter: rural areas only — where underservice is most concentrated
 - Minimum unserved population threshold to exclude very small areas
 - Results ranked by unserved population percentage
+- Each row includes the resolved geography name alongside its GEOID when available
 
 ---
 
@@ -136,7 +138,7 @@ List BDC bulk data files available for download for a specific filing period.
 | Type | Name | Description |
 |:---|:---|:---|
 | Resource | `fcc-broadband://geography/{type}/{id}/summary` | Broadband coverage summary for a specific geography: provider counts by speed tier, urban/rural split, tribal breakdown. Addressable by type and GEOID. |
-| Resource | `fcc-broadband://providers/list` | List of all Form 477 holding companies with `hoconum` identifiers and names. Reference for resolving `hoconum` before calling `fcc_get_provider`. |
+| Resource | `fcc-broadband://providers/list` | List of all Form 477 holding company numbers (`hoconum` identifiers only). Use `fcc_search_providers` to resolve a name to its hoconum. |
 | Prompt | `broadband_equity_analysis` | Structures a digital divide analysis comparing broadband access across demographic groups — guides chaining with Census and BLS data. Accepts `region` and `focus` (`underserved`, `rural`, `tribal`, `all`). |
 
 All resource data is also reachable via tools. The `providers/list` resource is derived from the deployment table via `$group` aggregation — use `fcc_search_providers` for filtered lookups.

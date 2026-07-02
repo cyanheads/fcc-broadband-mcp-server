@@ -9,9 +9,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { compareAreasTool } from '@/mcp-server/tools/definitions/compare-areas.tool.js';
 
 const mockGetAreaStatsBatch = vi.fn();
+const mockGetGeographyNames = vi.fn();
 
 vi.mock('@/services/open-data/open-data-service.js', () => ({
-  getOpenDataService: () => ({ getAreaStatsBatch: mockGetAreaStatsBatch }),
+  getOpenDataService: () => ({
+    getAreaStatsBatch: mockGetAreaStatsBatch,
+    getGeographyNames: mockGetGeographyNames,
+  }),
 }));
 
 const MOCK_STATS = [
@@ -43,6 +47,7 @@ describe('compareAreasTool', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockGetAreaStatsBatch.mockResolvedValue(MOCK_STATS);
+    mockGetGeographyNames.mockResolvedValue(new Map());
   });
 
   it('returns ranked areas for a list of geography IDs', async () => {
@@ -121,6 +126,92 @@ describe('compareAreasTool', () => {
       code: JsonRpcErrorCode.ValidationError,
       data: { reason: 'missing_geography_ids' },
     });
+  });
+
+  it('rejects a mis-shaped geography_ids entry before the batch call', async () => {
+    const ctx = createMockContext({ errors: compareAreasTool.errors });
+    const input = compareAreasTool.input.parse({
+      geography_type: 'county',
+      geography_ids: ['28107', '28'],
+    });
+    await expect(compareAreasTool.handler(input, ctx)).rejects.toMatchObject({
+      code: JsonRpcErrorCode.ValidationError,
+      data: { reason: 'invalid_geography_id_shape' },
+    });
+    expect(mockGetAreaStatsBatch).not.toHaveBeenCalled();
+  });
+
+  it('rejects county FIPS entries passed as state with the cross-hint', async () => {
+    const ctx = createMockContext({ errors: compareAreasTool.errors });
+    const input = compareAreasTool.input.parse({
+      geography_type: 'state',
+      geography_ids: ['06037', '28'],
+    });
+    await expect(compareAreasTool.handler(input, ctx)).rejects.toMatchObject({
+      code: JsonRpcErrorCode.ValidationError,
+      data: { reason: 'invalid_geography_id_shape' },
+      message: expect.stringContaining('county FIPS'),
+    });
+    expect(mockGetAreaStatsBatch).not.toHaveBeenCalled();
+  });
+
+  it('leaves tribal geography_ids unvalidated', async () => {
+    mockGetAreaStatsBatch.mockResolvedValue(
+      MOCK_STATS.map((s, i) => ({ ...s, id: ['T010', 'T02'][i] ?? s.id, type: 'tribal' })),
+    );
+    const ctx = createMockContext({ errors: compareAreasTool.errors });
+    const input = compareAreasTool.input.parse({
+      geography_type: 'tribal',
+      geography_ids: ['T010', 'T02'],
+    });
+    const result = await compareAreasTool.handler(input, ctx);
+    expect(result.areas).toHaveLength(2);
+    expect(mockGetAreaStatsBatch).toHaveBeenCalled();
+  });
+
+  it('resolves geography names into rows and format output', async () => {
+    mockGetGeographyNames.mockResolvedValue(
+      new Map([
+        ['28', 'Mississippi'],
+        ['01', 'Alabama'],
+      ]),
+    );
+    const ctx = createMockContext({ errors: compareAreasTool.errors });
+    const input = compareAreasTool.input.parse({
+      geography_type: 'state',
+      geography_ids: ['28', '01'],
+    });
+    const result = await compareAreasTool.handler(input, ctx);
+    expect(result.areas[0].name).toBe('Mississippi');
+    expect(result.areas[1].name).toBe('Alabama');
+    const blocks = compareAreasTool.format!(result);
+    const text = (blocks[0] as { text: string }).text;
+    expect(text).toContain('Name (GEOID)');
+    expect(text).toContain('Mississippi (28)');
+  });
+
+  it('omits name for a GEOID with no lookup match', async () => {
+    mockGetGeographyNames.mockResolvedValue(new Map([['28', 'Mississippi']]));
+    const ctx = createMockContext({ errors: compareAreasTool.errors });
+    const input = compareAreasTool.input.parse({
+      geography_type: 'state',
+      geography_ids: ['28', '01'],
+    });
+    const result = await compareAreasTool.handler(input, ctx);
+    expect(result.areas[0].name).toBe('Mississippi');
+    expect(result.areas[1].name).toBeUndefined();
+  });
+
+  it('succeeds without names when name resolution fails', async () => {
+    mockGetGeographyNames.mockRejectedValue(new Error('lookup unavailable'));
+    const ctx = createMockContext({ errors: compareAreasTool.errors });
+    const input = compareAreasTool.input.parse({
+      geography_type: 'state',
+      geography_ids: ['28', '01'],
+    });
+    const result = await compareAreasTool.handler(input, ctx);
+    expect(result.areas).toHaveLength(2);
+    expect(result.areas.every((a) => a.name === undefined)).toBe(true);
   });
 
   it('throws no_data_found when service returns empty array', async () => {

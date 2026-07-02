@@ -6,6 +6,7 @@
 import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
 import { getOpenDataService } from '@/services/open-data/open-data-service.js';
+import { geoidShapeError } from '@/services/open-data/types.js';
 
 /** FIPS codes for all 50 states + DC. */
 const ALL_STATE_FIPS = [
@@ -121,6 +122,10 @@ export const compareAreasTool = tool('fcc_compare_areas', {
         z
           .object({
             id: z.string().describe('FIPS GEOID.'),
+            name: z
+              .string()
+              .optional()
+              .describe('Human-readable geography name if resolved (e.g., "Pontotoc County, MS").'),
             rank: z.number().describe('Rank in the sorted comparison (1 = worst/lowest).'),
             noCoverage: z.number().describe('Population with no providers at the given speed.'),
             oneProvider: z.number().describe('Population with exactly one provider.'),
@@ -186,6 +191,13 @@ export const compareAreasTool = tool('fcc_compare_areas', {
       recovery:
         'Provide at least 2 geography_ids, or set compare_all_states=true with geography_type="state".',
     },
+    {
+      reason: 'invalid_geography_id_shape',
+      code: JsonRpcErrorCode.ValidationError,
+      when: 'A geography_ids entry has a digit count that does not match the geography_type (state=2, county=5, cd=4, cbsa=5, place=7).',
+      recovery:
+        'Use the digit count the geography_type expects: state=2, county=5, cd=4, cbsa=5, place=7. A 5-digit county FIPS starts with its 2-digit state prefix.',
+    },
   ],
 
   async handler(input, ctx) {
@@ -205,6 +217,15 @@ export const compareAreasTool = tool('fcc_compare_areas', {
         'Provide at least 2 geography_ids to compare, or set compare_all_states=true.',
         { ...ctx.recoveryFor('missing_geography_ids') },
       );
+    }
+
+    for (const id of geoIds) {
+      const shapeError = geoidShapeError(input.geography_type, id);
+      if (shapeError) {
+        throw ctx.fail('invalid_geography_id_shape', shapeError, {
+          ...ctx.recoveryFor('invalid_geography_id_shape'),
+        });
+      }
     }
 
     ctx.log.info('fcc_compare_areas', {
@@ -266,7 +287,19 @@ export const compareAreasTool = tool('fcc_compare_areas', {
       }
     });
 
-    const areas = sorted.map((s, i) => ({ ...s, rank: i + 1 }));
+    // Resolve GEOIDs to names in one batched lookup; a resolution failure never fails the call.
+    const names = await service
+      .getGeographyNames(
+        input.geography_type,
+        sorted.map((s) => s.id),
+        ctx,
+      )
+      .catch(() => new Map<string, string>());
+
+    const areas = sorted.map((s, i) => {
+      const name = names.get(s.id);
+      return { ...s, ...(name && { name }), rank: i + 1 };
+    });
 
     ctx.log.info('fcc_compare_areas succeeded', {
       areasCompared: areas.length,
@@ -307,13 +340,14 @@ export const compareAreasTool = tool('fcc_compare_areas', {
       `**Geography Type:** ${result.geographyType} | **Tech:** ${result.techFilter} | **Speed:** ${result.speedDownMbps} Mbps | **Sorted By:** ${sortLabel[result.sortBy] ?? result.sortBy}`,
       `**Data Vintage:** ${result.dataVintage} | **Areas Compared:** ${result.totalAreas}`,
       '',
-      `| Rank | Geography ID | Total Pop | No Coverage | 1 Provider | 2 Providers | 3+ Providers | Unserved% | Coverage% | Competitive% |`,
+      `| Rank | Name (GEOID) | Total Pop | No Coverage | 1 Provider | 2 Providers | 3+ Providers | Unserved% | Coverage% | Competitive% |`,
       `|:-----|:-------------|:----------|:------------|:-----------|:------------|:-------------|:----------|:----------|:-------------|`,
     ];
 
     for (const a of result.areas) {
+      const geoLabel = a.name ? `${a.name} (${a.id})` : a.id;
       lines.push(
-        `| ${a.rank} | ${a.id} | ${a.total.toLocaleString()} | ${a.noCoverage.toLocaleString()} | ${a.oneProvider.toLocaleString()} | ${a.twoProviders.toLocaleString()} | ${a.threeOrMore.toLocaleString()} | ${a.unservedPct}% | ${a.coveragePct}% | ${a.competitivePct}% |`,
+        `| ${a.rank} | ${geoLabel} | ${a.total.toLocaleString()} | ${a.noCoverage.toLocaleString()} | ${a.oneProvider.toLocaleString()} | ${a.twoProviders.toLocaleString()} | ${a.threeOrMore.toLocaleString()} | ${a.unservedPct}% | ${a.coveragePct}% | ${a.competitivePct}% |`,
       );
     }
 
