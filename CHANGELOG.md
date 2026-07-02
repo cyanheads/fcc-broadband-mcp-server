@@ -2,6 +2,10 @@
 
 All notable changes to this project. Each entry links to its full per-version file in [changelog/](changelog/).
 
+## [0.1.10](changelog/0.1.x/0.1.10.md) — 2026-07-02 · 🛡️ Security
+
+Fail-fast GEOID shape validation on fcc_get_coverage_summary and fcc_compare_areas, batched GEOID→name resolution in fcc_find_underserved and fcc_compare_areas output, mcp-ts-core ^0.10.10, and a lock refresh clearing 8 transitive advisories (hono, js-yaml).
+
 ## [0.1.9](changelog/0.1.x/0.1.9.md) — 2026-06-20
 
 mcp-ts-core ^0.10.6 → ^0.10.9: ctx.content media collector, sharper Canvas SQL error classification, fresh-scaffold devcheck guards, plus two new devcheck steps (dependency specifiers, plugin-manifest checks) synced into the toolchain.
