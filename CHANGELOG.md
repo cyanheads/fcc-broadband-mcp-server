@@ -2,6 +2,10 @@
 
 All notable changes to this project. Each entry links to its full per-version file in [changelog/](changelog/).
 
+## [0.1.14](changelog/0.1.x/0.1.14.md) — 2026-08-13
+
+Four ranking and filtering fixes across `fcc_find_underserved` and `fcc_compare_areas`: territory-aware state validation (#15), a safer `min_unserved_pop` default (#17), an unbounded area scan (#22), and worst-first sorting under every compare metric (#23).
+
 ## [0.1.13](changelog/0.1.x/0.1.13.md) — 2026-08-13
 
 @cyanheads/mcp-ts-core ^0.10.10 → ^0.11.5 adoption, Form 477 mirror stores now enforce per-store query ceilings (#19), and the repo gains a LICENSE plus community/security docs.

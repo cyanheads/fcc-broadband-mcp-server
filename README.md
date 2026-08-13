@@ -7,7 +7,7 @@
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/Version-0.1.13-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/users/cyanheads/packages/container/package/fcc-broadband-mcp-server) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-^1.30.0-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![npm](https://img.shields.io/npm/v/@cyanheads/fcc-broadband-mcp-server?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@cyanheads/fcc-broadband-mcp-server) [![TypeScript](https://img.shields.io/badge/TypeScript-^7.0.2-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.3.0-blueviolet.svg?style=flat-square)](https://bun.sh/)
+[![Version](https://img.shields.io/badge/Version-0.1.14-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/users/cyanheads/packages/container/package/fcc-broadband-mcp-server) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-^1.30.0-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![npm](https://img.shields.io/npm/v/@cyanheads/fcc-broadband-mcp-server?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@cyanheads/fcc-broadband-mcp-server) [![TypeScript](https://img.shields.io/badge/TypeScript-^7.0.2-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.3.0-blueviolet.svg?style=flat-square)](https://bun.sh/)
 
 </div>
 
@@ -84,6 +84,7 @@ Rank geographies by broadband access metrics to identify where underservice is w
 
 - Compare up to 50 geographies of the same type, or all 50 states + DC via `compare_all_states: true`
 - Sort by unserved population share, raw unserved headcount (useful for BEAD funding allocation), coverage rate, or competitive share
+- Every sort ranks worst-first — rank 1 is the area most in need, whichever metric you pick
 - Returns a ranked table with per-geography population and coverage metrics
 - Each row includes the resolved geography name alongside its GEOID when available
 
@@ -93,11 +94,11 @@ Rank geographies by broadband access metrics to identify where underservice is w
 
 Find the most broadband-underserved areas within a state or nationwide.
 
-- Scope to a specific state or run nationwide (returns top areas only)
+- Scope to a specific state or territory, or run nationwide (returns top areas only)
 - Geography granularity: county, congressional district, census place, or CBSA
 - Default filter: rural areas only — where underservice is most concentrated
-- Minimum unserved population threshold to exclude very small areas
-- Results ranked by unserved population percentage
+- `min_unserved_pop` defaults to 1, so fully covered areas stay out of the ranking; set it to 0 to rank every area, or higher to drop small gaps
+- Results ranked by unserved population, highest first
 - Each row includes the resolved geography name alongside its GEOID when available
 
 ---
