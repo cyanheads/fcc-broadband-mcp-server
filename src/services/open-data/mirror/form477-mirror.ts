@@ -214,6 +214,14 @@ export class Form477Mirror {
     return rows.map(toRawAreaRow);
   }
 
+  /**
+   * Type-wide area scan. Alone among the read shapes here it returns the full
+   * match count next to the page, because its caller ranks and counts the
+   * grouped result and so has to tell a complete scan from a capped one. The
+   * `maxRows` the caller passes is used verbatim: it is already bound to
+   * `MAX_SCAN_ROWS`, and anything above the store's declared ceiling is a
+   * caller bug the store rejects outright rather than something to clamp away.
+   */
   async areaStatsByType(options: {
     geographyType: string;
     techFilter: string;
@@ -221,7 +229,7 @@ export class Form477Mirror {
     urbanRuralFilter?: 'all' | 'R' | 'U';
     stateFipsPrefix?: string;
     maxRows: number;
-  }): Promise<RawAreaRow[] | undefined> {
+  }): Promise<{ rows: RawAreaRow[]; total: number } | undefined> {
     const prefix = options.stateFipsPrefix;
     const stateScoped = typeEmbedsState(options.geographyType) && prefix && /^\d{2}$/.test(prefix);
     const covered = stateScoped ? await this.#stateCovered(prefix) : await this.#fullCorpus();
@@ -240,12 +248,12 @@ export class Form477Mirror {
       filters.push({ column: 'id', op: 'gte', value: prefix });
       filters.push({ column: 'id', op: 'lt', value: prefixUpperBound(prefix) });
     }
-    const { rows } = await this.#stores.area.query({
+    const { rows, total } = await this.#stores.area.query({
       filters,
-      limit: Math.min(options.maxRows, MAX_SCAN_ROWS),
+      limit: options.maxRows,
       offset: 0,
     });
-    return rows.map(toRawAreaRow);
+    return { rows: rows.map(toRawAreaRow), total };
   }
 
   async searchProviders(options: {

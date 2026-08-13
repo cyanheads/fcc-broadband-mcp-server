@@ -212,7 +212,7 @@ Each step is independently testable.
   speed_down: z.enum(['0.2', '4', '10', '25', '100', '250', '1000']).default('25'),
   sort_by: z.enum(['unserved_pct', 'unserved_pop', 'coverage_pct', 'competitive_pct'])
     .default('unserved_pct')
-    .describe('Ranking field. "unserved_pct" = share of population with no broadband. "unserved_pop" = raw headcount useful for BEAD funding allocation. "competitive_pct" = share with 2+ providers.'),
+    .describe('Ranking field. "unserved_pct" = share of population with no broadband. "unserved_pop" = raw headcount useful for BEAD funding allocation. "coverage_pct" = share with any coverage. "competitive_pct" = share with 2+ providers. Every option ranks worst-first, so rank 1 is the highest unserved share or headcount, or the lowest coverage or competitive share.'),
 }
 ```
 
@@ -224,13 +224,13 @@ Each step is independently testable.
 ```ts
 {
   state: z.string().regex(/^[A-Z]{2}$/).optional()
-    .describe('2-letter state code (e.g., "WY", "MS") to limit scope. Omit for nationwide search — returns top areas only.'),
+    .describe('2-letter USPS state or territory code (e.g., "WY", "MS", "PR") to limit scope. An unrecognized code is rejected, not ignored. Omit for nationwide search — returns top areas only.'),
   geography_type: z.enum(['county', 'cd', 'place', 'cbsa']).default('county')
     .describe('Geographic granularity. "county" is most useful for policy analysis and BEAD eligibility.'),
   speed_down: z.enum(['0.2', '4', '10', '25', '100', '250', '1000']).default('25'),
   tech_filter: z.enum(['acfosw', 'f', 'c', 'a', 'o', 's', 'w']).default('acfosw'),
-  min_unserved_pop: z.number().int().min(0).default(0)
-    .describe('Minimum population with no coverage to include in results. Use to filter out very small areas (e.g., 500 filters areas with fewer than 500 unserved residents).'),
+  min_unserved_pop: z.number().int().min(0).default(1)
+    .describe('Minimum population with no coverage to include in results. Defaults to 1, which keeps fully covered areas out of a ranking of underserved ones. Set to 0 to rank every area regardless of unserved population, or higher to drop small gaps (e.g., 500 keeps only areas with at least 500 unserved residents).'),
   urban_rural_filter: z.enum(['all', 'R', 'U']).default('R')
     .describe('Defaults to rural ("R") — where underservice is most concentrated. Use "U" to find underserved urban areas (digital redlining research). Set to "all" for both.'),
   limit: z.number().int().min(1).max(100).default(20),

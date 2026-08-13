@@ -12,7 +12,9 @@ import type { StorageService } from '@cyanheads/mcp-ts-core/storage';
 import { httpErrorFromResponse, withRetry } from '@cyanheads/mcp-ts-core/utils';
 import type { ServerConfig } from '@/config/server-config.js';
 import { Form477Mirror } from './mirror/form477-mirror.js';
+import { MAX_SCAN_ROWS } from './mirror/stores.js';
 import {
+  type AreaScanResult,
   type AreaSegment,
   DATASET_IDS,
   type DeploymentRecord,
@@ -28,6 +30,18 @@ const BASE_URL = 'https://opendata.fcc.gov/resource';
 const TIMEOUT_MS = 30_000;
 const DEFAULT_LIMIT = 1000;
 const MAX_LIMIT = 50000;
+
+/**
+ * Raw Area Table rows one type-wide scan may read before grouping. Bound to the
+ * mirror's per-store ceiling so both serving paths stop at the same number: the
+ * mirror store rejects any query above it outright, and the live pager stops
+ * there. Sized against the June 2021 Form 477 snapshot, whose broadest
+ * type-wide scan — `place`, `tech='acfosw'`, one speed tier, no urban/rural
+ * filter — is 43,223 rows; the snapshot is frozen, so that headroom is fixed.
+ * A scan that does reach the ceiling comes back `scanTruncated: true` rather
+ * than as a silent prefix.
+ */
+const MAX_AREA_SCAN_ROWS = MAX_SCAN_ROWS;
 
 /** Accumulates area table rows into a per-id stats map. */
 function accumulateAreaRows(rows: RawAreaRow[]): Map<
@@ -214,7 +228,41 @@ export class OpenDataService {
   }
 
   /**
+   * Fetches pages of a SoQL query up to `maxRows` rows. `truncated` is true
+   * when the pager stopped at the cap without ever reading a short page — that
+   * is, without confirming it reached the end of the match — so a caller that
+   * aggregates or counts these rows can disclose the partial scan instead of
+   * treating the prefix as complete.
+   */
+  private async fetchPagesUpTo<T>(
+    datasetId: string,
+    params: SoqlParams,
+    ctx: Context,
+    maxRows: number,
+  ): Promise<{ rows: T[]; truncated: boolean }> {
+    const results: T[] = [];
+    let offset = 0;
+    const limit = Math.min(params.$limit ?? DEFAULT_LIMIT, DEFAULT_LIMIT);
+    let reachedEnd = false;
+
+    while (results.length < maxRows) {
+      const url = this.buildUrl(datasetId, { ...params, $limit: limit, $offset: offset });
+      const page = await this.fetchJson<T>(url, ctx);
+      results.push(...page);
+      if (page.length < limit) {
+        reachedEnd = true;
+        break;
+      }
+      offset += limit;
+    }
+
+    return { rows: results.slice(0, maxRows), truncated: !reachedEnd };
+  }
+
+  /**
    * Fetches all pages of results for a SoQL query, up to `maxRows` rows.
+   * Callers that must distinguish a complete read from a capped one use
+   * `fetchPagesUpTo` instead.
    */
   private async fetchAllPages<T>(
     datasetId: string,
@@ -222,19 +270,8 @@ export class OpenDataService {
     ctx: Context,
     maxRows = MAX_LIMIT,
   ): Promise<T[]> {
-    const results: T[] = [];
-    let offset = 0;
-    const limit = Math.min(params.$limit ?? DEFAULT_LIMIT, DEFAULT_LIMIT);
-
-    while (results.length < maxRows) {
-      const url = this.buildUrl(datasetId, { ...params, $limit: limit, $offset: offset });
-      const page = await this.fetchJson<T>(url, ctx);
-      results.push(...page);
-      if (page.length < limit) break;
-      offset += limit;
-    }
-
-    return results.slice(0, maxRows);
+    const { rows } = await this.fetchPagesUpTo<T>(datasetId, params, ctx, maxRows);
+    return rows;
   }
 
   /**
@@ -425,7 +462,10 @@ export class OpenDataService {
   }
 
   /**
-   * Fetches area table rows for geographies matching a type.
+   * Scans every area table row matching a geography type and groups them by
+   * GEOID. There is no caller-supplied row budget: the scan runs to the end of
+   * the match or to `MAX_AREA_SCAN_ROWS`, and reports which of the two it was
+   * so the caller can disclose an incomplete scan instead of ranking a prefix.
    */
   async getAreaStatsByType(
     options: {
@@ -434,25 +474,22 @@ export class OpenDataService {
       speedDown: string;
       urbanRuralFilter?: 'all' | 'R' | 'U';
       stateFipsPrefix?: string;
-      limit?: number;
     },
     ctx: Context,
-  ): Promise<
-    Array<{
-      id: string;
-      noCoverage: number;
-      oneProvider: number;
-      twoProviders: number;
-      threeOrMore: number;
-      total: number;
-    }>
-  > {
-    const maxRows = Math.min(options.limit ?? 10000, MAX_LIMIT);
-
-    let rows = await this.fromMirror(ctx, 'area', (m) =>
-      m.areaStatsByType({ ...options, maxRows }),
+  ): Promise<AreaScanResult> {
+    const mirrored = await this.fromMirror(ctx, 'area', (m) =>
+      m.areaStatsByType({ ...options, maxRows: MAX_AREA_SCAN_ROWS }),
     );
-    if (!rows) {
+
+    let rows: RawAreaRow[];
+    let scanTruncated: boolean;
+
+    if (mirrored) {
+      // The store reports the full match count alongside the page it returned,
+      // so the mirror path knows exactly what it left behind.
+      rows = mirrored.rows;
+      scanTruncated = mirrored.total > mirrored.rows.length;
+    } else {
       const conditions: string[] = [
         `type='${options.geographyType}'`,
         `tech='${options.techFilter}'`,
@@ -467,18 +504,31 @@ export class OpenDataService {
         conditions.push(`id LIKE '${options.stateFipsPrefix}%'`);
       }
 
-      rows = await this.fetchAllPages<RawAreaRow>(
+      const page = await this.fetchPagesUpTo<RawAreaRow>(
         DATASET_IDS.AREA_TABLE,
         {
           $where: conditions.join(' AND '),
           $limit: DEFAULT_LIMIT,
         },
         ctx,
-        maxRows,
+        MAX_AREA_SCAN_ROWS,
       );
+      rows = page.rows;
+      scanTruncated = page.truncated;
     }
 
-    return Array.from(accumulateAreaRows(rows).values());
+    if (scanTruncated) {
+      ctx.log.warning('Area table scan stopped at the row ceiling', {
+        geographyType: options.geographyType,
+        scanRowCap: MAX_AREA_SCAN_ROWS,
+      });
+    }
+
+    return {
+      stats: Array.from(accumulateAreaRows(rows).values()),
+      scanTruncated,
+      scanRowCap: MAX_AREA_SCAN_ROWS,
+    };
   }
 
   /**

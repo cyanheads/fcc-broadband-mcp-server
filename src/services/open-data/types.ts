@@ -122,6 +122,29 @@ export interface DeploymentRecord {
   techCode: string;
 }
 
+/** Population counts for one geography, summed across its area-table segments. */
+export interface AreaStats {
+  id: string;
+  noCoverage: number;
+  oneProvider: number;
+  threeOrMore: number;
+  total: number;
+  twoProviders: number;
+}
+
+/**
+ * Result of a type-wide area scan. `scanTruncated` says whether the raw row
+ * read behind `stats` reached the end of the upstream match: when it is true
+ * the stats cover only the rows that fit under `scanRowCap`, and any caller
+ * ranking or counting them must disclose that rather than present a prefix as
+ * the complete set.
+ */
+export interface AreaScanResult {
+  scanRowCap: number;
+  scanTruncated: boolean;
+  stats: AreaStats[];
+}
+
 /** Normalized area summary for a geography × segment. */
 export interface AreaSegment {
   coveragePct: number;

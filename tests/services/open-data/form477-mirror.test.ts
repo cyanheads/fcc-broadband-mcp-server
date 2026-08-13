@@ -375,12 +375,26 @@ describe('area routing', () => {
 
   it('rewrites the state-prefix LIKE as a range and scopes results to the state', async () => {
     const service = makeService(mirror);
-    const stats = await service.getAreaStatsByType(
+    const { stats, scanTruncated } = await service.getAreaStatsByType(
       { geographyType: 'county', techFilter: 'acfosw', speedDown: '25', stateFipsPrefix: '11' },
       ctx,
     );
     expect(fetchMock).not.toHaveBeenCalled();
     expect(stats.map((s) => s.id)).toEqual(['11001']); // 12001 excluded by the [gte, lt) range
+    expect(scanTruncated).toBe(false);
+  });
+
+  it('reports the full match count when a row budget truncates a type-wide scan', async () => {
+    await markCovered(mirror.stores.deployment, FULL_SCOPE);
+    const scan = await mirror.areaStatsByType({
+      geographyType: 'county',
+      techFilter: 'acfosw',
+      speedDown: '25',
+      maxRows: 1,
+    });
+    // Two county rows match (11001, 12001); a one-row budget must still say so.
+    expect(scan?.rows).toHaveLength(1);
+    expect(scan?.total).toBe(2);
   });
 
   it('requires full coverage for a type-wide scan without a state prefix', async () => {
@@ -540,16 +554,17 @@ describe('store query ceilings', () => {
         speedDown: '25',
       }),
     ).resolves.toHaveLength(1);
-    // 5,000 is what fcc_find_underserved drives through getAreaStatsByType.
+    // MAX_SCAN_ROWS is what getAreaStatsByType drives through here — the two
+    // serving paths share one ceiling, so this is the widest read it can ask for.
     await expect(
       mirror.areaStatsByType({
         geographyType: 'county',
         techFilter: 'acfosw',
         speedDown: '25',
         stateFipsPrefix: '11',
-        maxRows: 5_000,
+        maxRows: MAX_SCAN_ROWS,
       }),
-    ).resolves.toHaveLength(1);
+    ).resolves.toEqual({ rows: [expect.objectContaining({ id: '11001' })], total: 1 });
     await expect(mirror.geographyName('county', '11001')).resolves.toEqual({
       value: 'District of Columbia, DC',
     });
@@ -559,6 +574,18 @@ describe('store query ceilings', () => {
     await expect(mirror.providerSummary('130235')).resolves.toMatchObject({
       holdingCompanyName: 'Comcast Corporation',
     });
+  });
+
+  it('rejects a type-wide scan above the store ceiling instead of clamping it', async () => {
+    await markCovered(mirror.stores.deployment, FULL_SCOPE);
+    await expect(
+      mirror.areaStatsByType({
+        geographyType: 'county',
+        techFilter: 'acfosw',
+        speedDown: '25',
+        maxRows: MAX_SCAN_ROWS + 1,
+      }),
+    ).rejects.toThrow(`Mirror query limit must be an integer from 1 to ${MAX_SCAN_ROWS}.`);
   });
 
   it('accepts the widest provider search the service can ask for and rejects one row more', async () => {

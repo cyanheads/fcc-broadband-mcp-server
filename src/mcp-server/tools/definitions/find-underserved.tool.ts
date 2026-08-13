@@ -7,7 +7,13 @@ import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
 import { getOpenDataService } from '@/services/open-data/open-data-service.js';
 
-/** Maps 2-letter state abbreviations to 2-digit FIPS prefix for filtering county/cd/place IDs. */
+/**
+ * Maps USPS state and territory abbreviations to the 2-digit FIPS prefix used
+ * to filter county/cd/place GEOIDs, in FIPS order. Membership here is the only
+ * check on the `state` input beyond its two-uppercase-letter shape, so an
+ * abbreviation missing from this map is rejected rather than silently dropped.
+ * Form 477 covers the five inhabited territories alongside the states.
+ */
 const STATE_ABBR_TO_FIPS: Record<string, string> = {
   AL: '01',
   AK: '02',
@@ -60,6 +66,11 @@ const STATE_ABBR_TO_FIPS: Record<string, string> = {
   WV: '54',
   WI: '55',
   WY: '56',
+  AS: '60',
+  GU: '66',
+  MP: '69',
+  PR: '72',
+  VI: '78',
 };
 
 export const findUnderservedTool = tool('fcc_find_underserved', {
@@ -78,7 +89,7 @@ export const findUnderservedTool = tool('fcc_find_underserved', {
       .regex(/^[A-Z]{2}$/)
       .optional()
       .describe(
-        '2-letter state code (e.g., "WY", "MS") to limit scope. Omit for nationwide search — returns top areas only.',
+        '2-letter USPS state or territory code (e.g., "WY", "MS", "PR") to limit scope. An unrecognized code is rejected, not ignored. Omit for nationwide search — returns top areas only.',
       ),
     geography_type: z
       .enum(['county', 'cd', 'place', 'cbsa'])
@@ -102,9 +113,9 @@ export const findUnderservedTool = tool('fcc_find_underserved', {
       .number()
       .int()
       .min(0)
-      .default(0)
+      .default(1)
       .describe(
-        'Minimum population with no coverage to include. Use to filter out very small areas (e.g., 500 filters areas with fewer than 500 unserved residents).',
+        'Minimum population with no coverage to include. Defaults to 1, which keeps fully covered areas out of a ranking of underserved ones. Set to 0 to rank every area regardless of unserved population, or higher to drop small gaps (e.g., 500 keeps only areas with at least 500 unserved residents).',
       ),
     urban_rural_filter: z
       .enum(['all', 'R', 'U'])
@@ -165,6 +176,18 @@ export const findUnderservedTool = tool('fcc_find_underserved', {
       .optional()
       .describe('Number of areas returned after applying the limit. Present when truncated.'),
     cap: z.number().optional().describe('The limit that was applied. Present when truncated.'),
+    scanTruncated: z
+      .boolean()
+      .optional()
+      .describe(
+        'True when the upstream row scan stopped at its ceiling before reaching the end of the matching data, so totalFound and the ranking cover only the portion that was scanned. Absent when the scan read every matching row.',
+      ),
+    scanRowCap: z
+      .number()
+      .optional()
+      .describe(
+        'Raw upstream row ceiling that bound the scan. Present only when scanTruncated is true.',
+      ),
     appliedFilters: z
       .object({
         state: z
@@ -182,11 +205,30 @@ export const findUnderservedTool = tool('fcc_find_underserved', {
       .string()
       .optional()
       .describe(
-        'Recovery hint when no areas are found — suggests how to broaden the filters. Absent on successful results.',
+        'Guidance about the result set — how to broaden the filters when nothing matched, and how to narrow the query when the upstream scan hit its row ceiling. Absent when neither applies.',
       ),
   },
 
+  /*
+   * `format()` renders the domain output only — the framework mirrors this
+   * block's fields into `content[]` afterwards, and that trailer is the sole
+   * path by which a `content[]`-only client learns the ranking was capped or
+   * the upstream scan stopped short. Left unconfigured each field renders under
+   * its raw declared key (`**scanRowCap:** 50000`), which reads as debug output
+   * next to the prose notice and prints a row count the table's own figures
+   * would have grouped. These entries only relabel and reformat; the values
+   * reaching `structuredContent` are untouched.
+   */
   enrichmentTrailer: {
+    totalFound: { label: 'Total matching areas' },
+    truncated: { label: 'List truncated' },
+    shown: { label: 'Areas shown' },
+    cap: { label: 'Limit applied' },
+    scanTruncated: { label: 'Upstream scan truncated' },
+    scanRowCap: {
+      // Only rendered when populated, which happens only alongside scanTruncated.
+      render: (rowCap) => `**Scan row ceiling:** ${Number(rowCap).toLocaleString()}`,
+    },
     appliedFilters: {
       render: (filters) => {
         const lines = [
@@ -210,6 +252,13 @@ export const findUnderservedTool = tool('fcc_find_underserved', {
       recovery:
         'Lower min_unserved_pop, change urban_rural_filter to "all", or remove the state filter to search nationwide.',
     },
+    {
+      reason: 'unknown_state',
+      code: JsonRpcErrorCode.ValidationError,
+      when: 'The state input is two uppercase letters but is not a USPS state or territory abbreviation.',
+      recovery:
+        'Use a real two-letter USPS state or territory abbreviation such as "MS" or "PR", or omit state entirely to search nationwide.',
+    },
   ],
 
   async handler(input, ctx) {
@@ -220,21 +269,31 @@ export const findUnderservedTool = tool('fcc_find_underserved', {
       urbanRuralFilter: input.urban_rural_filter,
     });
 
+    // A code the map doesn't know can't be turned into a filter, and dropping
+    // it would answer a nationwide query the caller never asked for.
     const stateFipsPrefix = input.state ? STATE_ABBR_TO_FIPS[input.state] : undefined;
+    if (input.state && stateFipsPrefix === undefined) {
+      throw ctx.fail(
+        'unknown_state',
+        `"${input.state}" is not a USPS state or territory abbreviation.`,
+        { ...ctx.recoveryFor('unknown_state') },
+      );
+    }
     const service = getOpenDataService();
-    const stats = await service.getAreaStatsByType(
+    // The scan reads every matching row it can; the caller-facing `limit` trims
+    // the ranked list afterwards and never bounds the data the ranking sees.
+    const scan = await service.getAreaStatsByType(
       {
         geographyType: input.geography_type,
         techFilter: input.tech_filter,
         speedDown: input.speed_down,
         urbanRuralFilter: input.urban_rural_filter,
         ...(stateFipsPrefix !== undefined ? { stateFipsPrefix } : {}),
-        limit: 5000, // fetch enough to filter and rank
       },
       ctx,
     );
 
-    const filtered = stats.filter((s) => s.noCoverage >= input.min_unserved_pop);
+    const filtered = scan.stats.filter((s) => s.noCoverage >= input.min_unserved_pop);
 
     // Sort by unserved population descending
     filtered.sort((a, b) => b.noCoverage - a.noCoverage);
@@ -250,16 +309,49 @@ export const findUnderservedTool = tool('fcc_find_underserved', {
       urbanRuralFilter: input.urban_rural_filter,
       minUnservedPop: input.min_unserved_pop,
     };
-    ctx.enrich({ totalFound, appliedFilters });
+    ctx.enrich({
+      totalFound,
+      appliedFilters,
+      ...(scan.scanTruncated && { scanTruncated: true, scanRowCap: scan.scanRowCap }),
+    });
 
-    if (totalFound > input.limit) {
-      ctx.enrich.truncated({ shown: limited.length, cap: input.limit });
+    /*
+     * Every notice source lands in the single `notice` field (ctx.enrich.truncated
+     * routes through it too, last-wins), so compose one string and emit it once.
+     */
+    const notices: string[] = [];
+    const listTruncated = totalFound > input.limit;
+    if (listTruncated) {
+      notices.push(
+        `Showing the top ${limited.length} of ${totalFound} matching areas — raise limit or narrow the filters to see more.`,
+      );
+    }
+    if (scan.scanTruncated) {
+      notices.push(
+        `The upstream scan stopped at its ${scan.scanRowCap.toLocaleString()}-row ceiling, so totalFound and this ranking cover only the rows that were read. Narrow the query with a state filter, a single urban_rural_filter, or a coarser geography_type.`,
+      );
+    }
+    // Only reachable at min_unserved_pop 0, where a fully covered area still
+    // ranks. Say so rather than let the tool name imply every row is a gap.
+    const fullyCovered = limited.filter((s) => s.noCoverage === 0).length;
+    if (fullyCovered > 0) {
+      notices.push(
+        `${fullyCovered} of the ${limited.length} returned areas have no unserved population at ${input.speed_down} Mbps — they are fully covered and rank only because min_unserved_pop is 0. Set min_unserved_pop to 1 to drop them, or raise speed_down to find gaps at a higher threshold.`,
+      );
+    }
+    if (limited.length === 0) {
+      notices.push(
+        `No areas found with the current filters. Try lowering min_unserved_pop or setting urban_rural_filter to "all".`,
+      );
+    }
+    const notice = notices.join(' ');
+    if (listTruncated) {
+      ctx.enrich.truncated({ shown: limited.length, cap: input.limit, guidance: notice });
+    } else if (notice) {
+      ctx.enrich.notice(notice);
     }
 
     if (limited.length === 0) {
-      ctx.enrich.notice(
-        `No areas found with the current filters. Try lowering min_unserved_pop or setting urban_rural_filter to "all".`,
-      );
       return {
         areas: [],
         geographyType: input.geography_type,
