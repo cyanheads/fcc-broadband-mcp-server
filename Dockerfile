@@ -4,7 +4,7 @@
 # This stage installs all dependencies (including dev), builds the TypeScript
 # source code into JavaScript, and prepares the production assets.
 # ==============================================================================
-FROM oven/bun:1.3 AS build
+FROM oven/bun:1.3.14 AS build
 
 WORKDIR /usr/src/app
 
@@ -14,7 +14,9 @@ COPY package.json bun.lock ./
 # Install all dependencies (including dev dependencies for building), ignoring
 # lifecycle scripts so the optional `better-sqlite3` native addon isn't compiled
 # here — the runtime image uses Bun's built-in `bun:sqlite` for the mirror.
-RUN bun install --frozen-lockfile --ignore-scripts
+# The BuildKit cache mount persists Bun's global package cache across builds.
+RUN --mount=type=cache,target=/root/.bun/install/cache \
+    bun install --frozen-lockfile --ignore-scripts
 
 # Copy the rest of the source code
 COPY . .
@@ -30,7 +32,7 @@ RUN bun run build
 # application. It uses a slim base image and only includes production
 # dependencies and build artifacts.
 # ==============================================================================
-FROM oven/bun:1.3-slim AS production
+FROM oven/bun:1.3.14-slim AS production
 
 WORKDIR /usr/src/app
 
@@ -51,14 +53,21 @@ COPY package.json bun.lock ./
 
 # Install only production dependencies, ignoring any lifecycle scripts (like 'prepare')
 # that are not needed in the final production image.
-RUN bun install --production --frozen-lockfile --ignore-scripts
+# `--omit=peer` drops the framework's optional peer tiers (test runner, service
+# SDKs, parsers) that Bun would otherwise auto-install, along with this server's
+# own optional `better-sqlite3` peer — the image runs on Bun's built-in
+# `bun:sqlite`. The OTEL step below carries the same flag: without it, that
+# install re-resolves the graph and pulls every optional peer back in.
+RUN --mount=type=cache,target=/root/.bun/install/cache \
+    bun install --production --omit=peer --frozen-lockfile --ignore-scripts
 
 # Conditionally install OpenTelemetry optional peer dependencies (Tier 3).
 # These are not bundled by default to keep the base image lean. Enable at build time
 # with: docker build --build-arg OTEL_ENABLED=true
 ARG OTEL_ENABLED=true
-RUN if [ "$OTEL_ENABLED" = "true" ]; then \
-      bun add @hono/otel \
+RUN --mount=type=cache,target=/root/.bun/install/cache \
+    if [ "$OTEL_ENABLED" = "true" ]; then \
+      bun add --omit=dev --omit=peer --ignore-scripts @hono/otel \
         @opentelemetry/instrumentation-http \
         @opentelemetry/exporter-metrics-otlp-http \
         @opentelemetry/exporter-trace-otlp-http \

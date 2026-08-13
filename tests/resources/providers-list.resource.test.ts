@@ -27,7 +27,7 @@ describe('providersListResource', () => {
     const result = await providersListResource.handler({}, ctx);
     expect(result.providers).toHaveLength(3);
     expect(result.count).toBe(3);
-    expect(result.providers[0].hoconum).toBe('130152');
+    expect(result.providers[0]!.hoconum).toBe('130152');
   });
 
   it('includes dataVintage in output', async () => {

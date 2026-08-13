@@ -30,17 +30,17 @@ describe('searchProvidersTool', () => {
   });
 
   it('returns providers for a name search', async () => {
-    const ctx = createMockContext();
+    const ctx = createMockContext({ errors: searchProvidersTool.errors });
     const input = searchProvidersTool.input.parse({ name_search: 'Comcast' });
     const result = await searchProvidersTool.handler(input, ctx);
     expect(result.providers).toHaveLength(1);
-    expect(result.providers[0].hoconum).toBe('130152');
+    expect(result.providers[0]!.hoconum).toBe('130152');
     expect(result.totalFound).toBe(1);
   });
 
   it('returns empty result with notice in enrichment when no providers found', async () => {
     mockSearchProviders.mockResolvedValue([]);
-    const ctx = createMockContext();
+    const ctx = createMockContext({ errors: searchProvidersTool.errors });
     const input = searchProvidersTool.input.parse({
       name_search: 'NonexistentISP',
       state: 'WA',
@@ -54,10 +54,10 @@ describe('searchProvidersTool', () => {
   });
 
   it('omits optional params from service call when not provided', async () => {
-    const ctx = createMockContext();
+    const ctx = createMockContext({ errors: searchProvidersTool.errors });
     const input = searchProvidersTool.input.parse({ limit: 50 });
     await searchProvidersTool.handler(input, ctx);
-    const callArgs = mockSearchProviders.mock.calls[0][0] as Record<string, unknown>;
+    const callArgs = mockSearchProviders.mock.calls[0]![0] as Record<string, unknown>;
     expect(callArgs).not.toHaveProperty('nameSearch');
     expect(callArgs).not.toHaveProperty('state');
     expect(callArgs).not.toHaveProperty('techCodes');
@@ -65,7 +65,7 @@ describe('searchProvidersTool', () => {
   });
 
   it('passes filters to service correctly', async () => {
-    const ctx = createMockContext();
+    const ctx = createMockContext({ errors: searchProvidersTool.errors });
     const input = searchProvidersTool.input.parse({
       name_search: 'Comcast',
       state: 'WA',

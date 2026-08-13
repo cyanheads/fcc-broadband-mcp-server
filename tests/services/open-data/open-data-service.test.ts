@@ -97,8 +97,9 @@ describe('OpenDataService', () => {
       expect(mcpError.code).toBe(JsonRpcErrorCode.Timeout);
       expect(mcpError.data?.retryable).toBe(false);
       expect(mcpError.data?.reason).toBe('live_search_timeout');
-      expect((mcpError.data?.recovery as { hint: string }).hint).toContain('state filter');
-      expect((mcpError.data?.recovery as { hint: string }).hint).toContain('FCC_MIRROR_ENABLED');
+      const recovery = mcpError.data?.recovery as { hint: string } | undefined;
+      expect(recovery?.hint).toContain('state filter');
+      expect(recovery?.hint).toContain('FCC_MIRROR_ENABLED');
       // The whole point of issue #14: exactly one upstream attempt.
       expect(fetchMock).toHaveBeenCalledTimes(1);
     });

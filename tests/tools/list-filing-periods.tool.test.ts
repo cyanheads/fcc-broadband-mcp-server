@@ -29,7 +29,7 @@ describe('listFilingPeriodsTool', () => {
     const ctx = createMockContext();
     const input = listFilingPeriodsTool.input.parse({ include_bdc: false });
     const result = await listFilingPeriodsTool.handler(input, ctx);
-    expect(result.periods[0].asOfDate).toBe('2021-06-30');
+    expect(result.periods[0]!.asOfDate).toBe('2021-06-30');
     expect(result.form477Count).toBe(3);
     expect(result.bdcCount).toBe(0);
   });
@@ -44,7 +44,7 @@ describe('listFilingPeriodsTool', () => {
     const result = await listFilingPeriodsTool.handler(input, ctx);
     expect(result.form477Count).toBe(3);
     expect(result.bdcCount).toBe(1);
-    expect(result.periods[0].asOfDate).toBe('2024-06-30');
+    expect(result.periods[0]!.asOfDate).toBe('2024-06-30');
   });
 
   it('passes includeBdc flag to service', async () => {

@@ -2,6 +2,10 @@
 
 All notable changes to this project. Each entry links to its full per-version file in [changelog/](changelog/).
 
+## [0.1.13](changelog/0.1.x/0.1.13.md) — 2026-08-13
+
+@cyanheads/mcp-ts-core ^0.10.10 → ^0.11.5 adoption, Form 477 mirror stores now enforce per-store query ceilings (#19), and the repo gains a LICENSE plus community/security docs.
+
 ## [0.1.12](changelog/0.1.x/0.1.12.md) — 2026-07-02
 
 fcc_search_providers no longer retries its deterministic live GROUP BY timeout 4x — deadline aborts are classified as McpError(Timeout), the grouped query fails once with a non-retryable live_search_timeout and a recovery hint, and name searches drop the 10x grouped-row headroom.

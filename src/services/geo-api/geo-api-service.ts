@@ -58,7 +58,7 @@ export class GeoApiService {
         const stateCode = raw.State?.code ?? '';
         const stateName = raw.State?.name ?? '';
 
-        if (!blockFips || blockFips.length !== 15) {
+        if (blockFips.length !== 15) {
           throw serviceUnavailable(
             `FCC Geo API returned invalid block FIPS "${blockFips}" — expected 15 digits`,
             { latitude, longitude, blockFips },

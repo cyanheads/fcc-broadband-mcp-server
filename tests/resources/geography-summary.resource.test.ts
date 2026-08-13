@@ -72,19 +72,14 @@ describe('geographySummaryResource', () => {
   });
 
   // All valid geography types
-  it.each([
-    'nation',
-    'state',
-    'county',
-    'cd',
-    'place',
-    'cbsa',
-    'tribal',
-  ])('accepts valid geography type "%s"', async (geoType) => {
-    const ctx = createMockContext();
-    const result = await geographySummaryResource.handler({ type: geoType, id: '01' }, ctx);
-    expect(result.geography.type).toBe(geoType);
-  });
+  it.each(['nation', 'state', 'county', 'cd', 'place', 'cbsa', 'tribal'])(
+    'accepts valid geography type "%s"',
+    async (geoType) => {
+      const ctx = createMockContext();
+      const result = await geographySummaryResource.handler({ type: geoType, id: '01' }, ctx);
+      expect(result.geography.type).toBe(geoType);
+    },
+  );
 
   // Invalid geography type throws
   it('throws ValidationError for unrecognised geography type', async () => {
@@ -188,8 +183,8 @@ describe('geographySummaryResource', () => {
     mockGetAreaSegments.mockResolvedValue([tribalSeg]);
     const ctx = createMockContext();
     const result = await geographySummaryResource.handler({ type: 'tribal', id: '123' }, ctx);
-    expect(result.segments[0].urbanRural).toBe('R');
-    expect(result.segments[0].tribal).toBe('T');
+    expect(result.segments[0]!.urbanRural).toBe('R');
+    expect(result.segments[0]!.tribal).toBe('T');
   });
 
   // Percentages rounded to 1 decimal

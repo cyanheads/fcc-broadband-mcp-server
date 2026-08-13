@@ -55,9 +55,9 @@ describe('findUnderservedTool', () => {
     const ctx = createMockContext({ errors: findUnderservedTool.errors });
     const input = findUnderservedTool.input.parse({ geography_type: 'county' });
     const result = await findUnderservedTool.handler(input, ctx);
-    expect(result.areas[0].id).toBe('28049');
-    expect(result.areas[0].rank).toBe(1);
-    expect(result.areas[0].noCoverage).toBe(30000);
+    expect(result.areas[0]!.id).toBe('28049');
+    expect(result.areas[0]!.rank).toBe(1);
+    expect(result.areas[0]!.noCoverage).toBe(30000);
     expect(getEnrichment(ctx).totalFound).toBe(3);
   });
 
@@ -101,7 +101,7 @@ describe('findUnderservedTool', () => {
       state: 'WA',
     });
     await findUnderservedTool.handler(input, ctx);
-    const callArgs = mockGetAreaStatsByType.mock.calls[0][0] as Record<string, unknown>;
+    const callArgs = mockGetAreaStatsByType.mock.calls[0]![0] as Record<string, unknown>;
     expect(callArgs).toHaveProperty('stateFipsPrefix', '53');
   });
 
@@ -109,7 +109,7 @@ describe('findUnderservedTool', () => {
     const ctx = createMockContext({ errors: findUnderservedTool.errors });
     const input = findUnderservedTool.input.parse({ geography_type: 'county' });
     await findUnderservedTool.handler(input, ctx);
-    const callArgs = mockGetAreaStatsByType.mock.calls[0][0] as Record<string, unknown>;
+    const callArgs = mockGetAreaStatsByType.mock.calls[0]![0] as Record<string, unknown>;
     expect(callArgs.stateFipsPrefix).toBeUndefined();
   });
 
@@ -121,7 +121,7 @@ describe('findUnderservedTool', () => {
       limit: 1,
     });
     const result = await findUnderservedTool.handler(input, ctx);
-    expect(result.areas[0].name).toBe('Hinds County, MS');
+    expect(result.areas[0]!.name).toBe('Hinds County, MS');
     expect(mockGetGeographyNames).toHaveBeenCalledWith('county', ['28049'], expect.anything());
   });
 
@@ -130,8 +130,8 @@ describe('findUnderservedTool', () => {
     const ctx = createMockContext({ errors: findUnderservedTool.errors });
     const input = findUnderservedTool.input.parse({ geography_type: 'county' });
     const result = await findUnderservedTool.handler(input, ctx);
-    expect(result.areas[0].name).toBe('Hinds County, MS');
-    expect(result.areas[1].name).toBeUndefined();
+    expect(result.areas[0]!.name).toBe('Hinds County, MS');
+    expect(result.areas[1]!.name).toBeUndefined();
   });
 
   it('succeeds without names when name resolution fails', async () => {

@@ -59,12 +59,10 @@ describe('compareAreasTool', () => {
     const result = await compareAreasTool.handler(input, ctx);
     expect(result.areas).toHaveLength(2);
     // sorted by unserved_pct descending — 28 has higher unserved%
-    expect(result.areas[0].id).toBe('28');
-    expect(result.areas[0].rank).toBe(1);
+    expect(result.areas[0]!.id).toBe('28');
+    expect(result.areas[0]!.rank).toBe(1);
     // enrichment
-    const enrichment = getEnrichment(ctx);
-    expect(enrichment.appliedFilters).toBeDefined();
-    expect(enrichment.appliedFilters.areasCompared).toBe(2);
+    expect(getEnrichment(ctx)).toMatchObject({ appliedFilters: { areasCompared: 2 } });
   });
 
   it('uses all 50 states when compare_all_states=true', async () => {
@@ -74,7 +72,7 @@ describe('compareAreasTool', () => {
       compare_all_states: true,
     });
     await compareAreasTool.handler(input, ctx);
-    const callArgs = mockGetAreaStatsBatch.mock.calls[0][0] as { geographyIds: string[] };
+    const callArgs = mockGetAreaStatsBatch.mock.calls[0]![0] as { geographyIds: string[] };
     expect(callArgs.geographyIds.length).toBe(51); // 50 states + DC
   });
 
@@ -86,7 +84,7 @@ describe('compareAreasTool', () => {
       sort_by: 'unserved_pop',
     });
     const result = await compareAreasTool.handler(input, ctx);
-    expect(result.areas[0].noCoverage).toBeGreaterThanOrEqual(result.areas[1].noCoverage);
+    expect(result.areas[0]!.noCoverage).toBeGreaterThanOrEqual(result.areas[1]!.noCoverage);
   });
 
   it('throws invalid_all_states_combo when compare_all_states=true with non-state type', async () => {
@@ -182,8 +180,8 @@ describe('compareAreasTool', () => {
       geography_ids: ['28', '01'],
     });
     const result = await compareAreasTool.handler(input, ctx);
-    expect(result.areas[0].name).toBe('Mississippi');
-    expect(result.areas[1].name).toBe('Alabama');
+    expect(result.areas[0]!.name).toBe('Mississippi');
+    expect(result.areas[1]!.name).toBe('Alabama');
     const blocks = compareAreasTool.format!(result);
     const text = (blocks[0] as { text: string }).text;
     expect(text).toContain('Name (GEOID)');
@@ -198,8 +196,8 @@ describe('compareAreasTool', () => {
       geography_ids: ['28', '01'],
     });
     const result = await compareAreasTool.handler(input, ctx);
-    expect(result.areas[0].name).toBe('Mississippi');
-    expect(result.areas[1].name).toBeUndefined();
+    expect(result.areas[0]!.name).toBe('Mississippi');
+    expect(result.areas[1]!.name).toBeUndefined();
   });
 
   it('succeeds without names when name resolution fails', async () => {

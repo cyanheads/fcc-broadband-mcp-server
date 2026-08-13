@@ -30,7 +30,7 @@ describe('geocodeBlockTool', () => {
   });
 
   it('returns block location for valid coordinates', async () => {
-    const ctx = createMockContext();
+    const ctx = createMockContext({ errors: geocodeBlockTool.errors });
     const input = geocodeBlockTool.input.parse({ latitude: 47.6062, longitude: -122.3321 });
     const result = await geocodeBlockTool.handler(input, ctx);
     expect(result).toMatchObject({

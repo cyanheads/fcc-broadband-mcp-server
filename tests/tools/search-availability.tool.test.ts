@@ -35,13 +35,13 @@ describe('searchAvailabilityTool', () => {
   });
 
   it('returns providers for a valid block FIPS', async () => {
-    const ctx = createMockContext();
+    const ctx = createMockContext({ errors: searchAvailabilityTool.errors });
     const input = searchAvailabilityTool.input.parse({ block_fips: '530330081021016' });
     const result = await searchAvailabilityTool.handler(input, ctx);
     expect(result.blockFips).toBe('530330081021016');
     expect(result.providers).toHaveLength(1);
-    expect(result.providers[0].hoconum).toBe('130152');
-    expect(result.providers[0].techLabel).toBe('Cable modem (DOCSIS 3.0)');
+    expect(result.providers[0]!.hoconum).toBe('130152');
+    expect(result.providers[0]!.techLabel).toBe('Cable modem (DOCSIS 3.0)');
     expect(result.totalProviders).toBe(1);
     // enrichment
     const enrichment = getEnrichment(ctx);
@@ -50,7 +50,7 @@ describe('searchAvailabilityTool', () => {
   });
 
   it('passes tech filter and min speed to service', async () => {
-    const ctx = createMockContext();
+    const ctx = createMockContext({ errors: searchAvailabilityTool.errors });
     const input = searchAvailabilityTool.input.parse({
       block_fips: '530330081021016',
       tech_filter: ['50'],
@@ -66,10 +66,10 @@ describe('searchAvailabilityTool', () => {
   });
 
   it('omits optional params when not provided', async () => {
-    const ctx = createMockContext();
+    const ctx = createMockContext({ errors: searchAvailabilityTool.errors });
     const input = searchAvailabilityTool.input.parse({ block_fips: '530330081021016' });
     await searchAvailabilityTool.handler(input, ctx);
-    const callArgs = mockGetDeploymentByBlock.mock.calls[0][1] as Record<string, unknown>;
+    const callArgs = mockGetDeploymentByBlock.mock.calls[0]![1] as Record<string, unknown>;
     expect(callArgs).not.toHaveProperty('techCodes');
     expect(callArgs).not.toHaveProperty('minSpeedDown');
     expect(callArgs).not.toHaveProperty('consumer');
@@ -82,7 +82,7 @@ describe('searchAvailabilityTool', () => {
       techLabel: 'Fiber to premises',
     };
     mockGetDeploymentByBlock.mockResolvedValue([MOCK_PROVIDER, sameHolco]);
-    const ctx = createMockContext();
+    const ctx = createMockContext({ errors: searchAvailabilityTool.errors });
     const input = searchAvailabilityTool.input.parse({ block_fips: '530330081021016' });
     const result = await searchAvailabilityTool.handler(input, ctx);
     expect(result.providers).toHaveLength(2);

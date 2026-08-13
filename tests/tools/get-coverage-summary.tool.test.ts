@@ -53,11 +53,9 @@ describe('getCoverageSummaryTool', () => {
     expect(result.population.total).toBe(100000);
     expect(result.unservedPct).toBe(50);
     // enrichment
-    const enrichment = getEnrichment(ctx);
-    expect(enrichment.appliedFilters).toBeDefined();
-    expect(enrichment.appliedFilters.geographyType).toBe('state');
-    expect(enrichment.appliedFilters.geographyId).toBe('28');
-    expect(enrichment.appliedFilters.speedDownMbps).toBe(25);
+    expect(getEnrichment(ctx)).toMatchObject({
+      appliedFilters: { geographyType: 'state', geographyId: '28', speedDownMbps: 25 },
+    });
   });
 
   it('returns nation-level summary without geography_id', async () => {
@@ -112,18 +110,21 @@ describe('getCoverageSummaryTool', () => {
     ['cd', '06037'],
     ['cbsa', '310'],
     ['place', '06440'],
-  ])('throws invalid_geography_id_shape for geography_type="%s" with mis-shaped id "%s"', async (geographyType, geographyId) => {
-    const ctx = createMockContext({ errors: getCoverageSummaryTool.errors });
-    const input = getCoverageSummaryTool.input.parse({
-      geography_type: geographyType,
-      geography_id: geographyId,
-    });
-    await expect(getCoverageSummaryTool.handler(input, ctx)).rejects.toMatchObject({
-      code: JsonRpcErrorCode.ValidationError,
-      data: { reason: 'invalid_geography_id_shape' },
-    });
-    expect(mockGetAreaSegments).not.toHaveBeenCalled();
-  });
+  ])(
+    'throws invalid_geography_id_shape for geography_type="%s" with mis-shaped id "%s"',
+    async (geographyType, geographyId) => {
+      const ctx = createMockContext({ errors: getCoverageSummaryTool.errors });
+      const input = getCoverageSummaryTool.input.parse({
+        geography_type: geographyType,
+        geography_id: geographyId,
+      });
+      await expect(getCoverageSummaryTool.handler(input, ctx)).rejects.toMatchObject({
+        code: JsonRpcErrorCode.ValidationError,
+        data: { reason: 'invalid_geography_id_shape' },
+      });
+      expect(mockGetAreaSegments).not.toHaveBeenCalled();
+    },
+  );
 
   it('throws invalid_geography_id_shape for a non-numeric geography_id', async () => {
     const ctx = createMockContext({ errors: getCoverageSummaryTool.errors });

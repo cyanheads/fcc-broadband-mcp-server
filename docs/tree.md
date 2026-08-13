@@ -1,11 +1,9 @@
 # fcc-broadband-mcp-server - Directory Structure
 
-Generated on: 2026-07-02 14:28:41
+Generated on: 2026-08-13 09:02:14
 
 ```text
 fcc-broadband-mcp-server/
-├── .agents/
-├── .claude/
 ├── .claude-plugin/
 │   └── plugin.json
 ├── .codex-plugin/
@@ -16,7 +14,10 @@ fcc-broadband-mcp-server/
 │   │   ├── bug_report.yml
 │   │   ├── config.yml
 │   │   └── feature_request.yml
-│   └── FUNDING.yml
+│   ├── CODE_OF_CONDUCT.md
+│   ├── CONTRIBUTING.md
+│   ├── FUNDING.yml
+│   └── SECURITY.md
 ├── .vscode/
 │   ├── extensions.json
 │   └── settings.json
@@ -193,6 +194,7 @@ fcc-broadband-mcp-server/
 │       └── search-providers.tool.test.ts
 ├── .dockerignore
 ├── .env.example
+├── .gitattributes
 ├── .gitignore
 ├── .mcpbignore
 ├── AGENTS.md
@@ -204,6 +206,7 @@ fcc-broadband-mcp-server/
 ├── CLAUDE.md
 ├── devcheck.config.json
 ├── Dockerfile
+├── LICENSE
 ├── manifest.json
 ├── package.json
 ├── README.md

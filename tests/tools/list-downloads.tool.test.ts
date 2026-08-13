@@ -43,8 +43,8 @@ describe('listDownloadsTool', () => {
     expect(result.asOfDate).toBe('2024-06-30');
     expect(result.dataType).toBe('availability');
     expect(result.totalFiles).toBe(1);
-    expect(result.files[0].fileId).toBe('file-001');
-    expect(result.files[0].downloadUrl).toContain('broadbandmap.fcc.gov');
+    expect(result.files[0]!.fileId).toBe('file-001');
+    expect(result.files[0]!.downloadUrl).toContain('broadbandmap.fcc.gov');
   });
 
   it('passes all filters to service when provided', async () => {
@@ -75,7 +75,7 @@ describe('listDownloadsTool', () => {
     const ctx = createMockContext({ errors: listDownloadsTool.errors });
     const input = listDownloadsTool.input.parse({ as_of_date: '2024-06-30' });
     await listDownloadsTool.handler(input, ctx);
-    const callArgs = mockListDownloads.mock.calls[0][0] as Record<string, unknown>;
+    const callArgs = mockListDownloads.mock.calls[0]![0] as Record<string, unknown>;
     expect(callArgs.dataType).toBe('availability');
     expect(callArgs).not.toHaveProperty('category');
     expect(callArgs).not.toHaveProperty('technologyType');
@@ -202,11 +202,11 @@ describe('listDownloadsTool', () => {
     const ctx = createMockContext({ errors: listDownloadsTool.errors });
     const input = listDownloadsTool.input.parse({ as_of_date: '2024-06-30' });
     const result = await listDownloadsTool.handler(input, ctx);
-    expect(result.files[0].subcategory).toBeUndefined();
-    expect(result.files[0].technologyType).toBeUndefined();
-    expect(result.files[0].stateName).toBeUndefined();
-    expect(result.files[0].recordCount).toBeUndefined();
-    expect(result.files[0].fileSizeBytes).toBeUndefined();
+    expect(result.files[0]!.subcategory).toBeUndefined();
+    expect(result.files[0]!.technologyType).toBeUndefined();
+    expect(result.files[0]!.stateName).toBeUndefined();
+    expect(result.files[0]!.recordCount).toBeUndefined();
+    expect(result.files[0]!.fileSizeBytes).toBeUndefined();
   });
 
   it('handles large file count correctly', async () => {
@@ -299,7 +299,7 @@ describe('listDownloadsTool', () => {
       provider_name: "'; DROP TABLE providers; --",
     });
     await listDownloadsTool.handler(input, ctx);
-    const callArgs = mockListDownloads.mock.calls[0][0] as Record<string, unknown>;
+    const callArgs = mockListDownloads.mock.calls[0]![0] as Record<string, unknown>;
     // The raw injection string is forwarded — the service is responsible for safe handling.
     // What we verify here is that the output doesn't echo back unescaped injection strings
     // in a way that could confuse downstream consumers.
@@ -313,7 +313,7 @@ describe('listDownloadsTool', () => {
       provider_name: 'Telecom España',
     });
     await listDownloadsTool.handler(input, ctx);
-    const callArgs = mockListDownloads.mock.calls[0][0] as Record<string, unknown>;
+    const callArgs = mockListDownloads.mock.calls[0]![0] as Record<string, unknown>;
     expect(callArgs.providerName).toBe('Telecom España');
   });
 
@@ -327,7 +327,7 @@ describe('listDownloadsTool', () => {
       provider_name: longName,
     });
     await listDownloadsTool.handler(input, ctx);
-    const callArgs = mockListDownloads.mock.calls[0][0] as Record<string, unknown>;
+    const callArgs = mockListDownloads.mock.calls[0]![0] as Record<string, unknown>;
     expect(callArgs.providerName).toBe(longName);
   });
 });

@@ -37,7 +37,7 @@ describe('getProviderTool', () => {
   });
 
   it('returns provider profile for a valid hoconum', async () => {
-    const ctx = createMockContext();
+    const ctx = createMockContext({ errors: getProviderTool.errors });
     const input = getProviderTool.input.parse({ hoconum: '130152' });
     const result = await getProviderTool.handler(input, ctx);
     expect(result.hoconum).toBe('130152');
@@ -47,7 +47,7 @@ describe('getProviderTool', () => {
   });
 
   it('filters zero-count speed tiers from speedTierLocations', async () => {
-    const ctx = createMockContext();
+    const ctx = createMockContext({ errors: getProviderTool.errors });
     const input = getProviderTool.input.parse({ hoconum: '130152' });
     const result = await getProviderTool.handler(input, ctx);
     // d_1, d_2, d_3 are 0 and should be filtered out
