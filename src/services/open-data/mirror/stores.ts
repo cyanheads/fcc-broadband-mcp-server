@@ -3,7 +3,8 @@
  * `sqliteMirrorStore` per corpus table plus a derived provider-dimension store,
  * each in its own database file under the mirror directory (the framework's
  * `mirror_sync_state` is a single-row table per file, so stores cannot share
- * one). Also owns the `mirror_coverage` bookkeeping table (which state-scoped
+ * one). Also owns the row ceilings the specs declare and the read facade
+ * imports, and the `mirror_coverage` bookkeeping table (which state-scoped
  * ingest units have fully drained, plus the full-corpus marker), which lives in
  * the deployment database and is created via idempotent DDL on the raw handle
  * (framework migrations do not run on fresh databases, so aux DDL cannot ride
@@ -17,6 +18,23 @@ import {
   type SqliteHandle,
   sqliteMirrorStore,
 } from '@cyanheads/mcp-ts-core/mirror';
+
+/*
+ * Per-store row ceilings, declared on the specs below and imported by the read
+ * facade's call sites so the bound the framework enforces and the limit a
+ * caller asks for stay the same number. Only `limit` is bounded: filter counts
+ * are fixed by the call sites, the `in` lists carry batched id sets the tool
+ * schemas already cap, and `getByIds` has no caller here.
+ */
+
+/** Scoped bulk scans — deployment by block, area by geography, geography names by id batch. */
+export const MAX_SCAN_ROWS = 50_000;
+
+/** Provider-dimension search — `search_providers` reads 10 dimension rows per result, capped at 200 results. */
+export const MAX_PROVIDER_SEARCH_ROWS = 2_000;
+
+/** The two single-provider lookups behind a provider summary. */
+export const MAX_PROVIDER_SUMMARY_ROWS = 1_000;
 
 /** The five stores backing the Form 477 mirror. */
 export interface Form477Stores {
@@ -60,6 +78,7 @@ export function createForm477Stores(dir: string): Form477Stores {
         business: 'TEXT',
       },
       indexes: [{ columns: ['blockcode'] }],
+      limits: { limit: MAX_SCAN_ROWS },
     }),
     area: sqliteMirrorStore({
       path: join(dir, 'area.sqlite'),
@@ -79,6 +98,7 @@ export function createForm477Stores(dir: string): Form477Stores {
         has_3more: 'TEXT',
       },
       indexes: [{ columns: ['type', 'tech', 'speed', 'id'] }],
+      limits: { limit: MAX_SCAN_ROWS },
     }),
     providerSummary: sqliteMirrorStore({
       path: join(dir, 'provider-summary.sqlite'),
@@ -98,6 +118,7 @@ export function createForm477Stores(dir: string): Form477Stores {
         d_8: 'TEXT',
       },
       indexes: [{ columns: ['hoconum'] }],
+      limits: { limit: MAX_PROVIDER_SUMMARY_ROWS },
     }),
     geography: sqliteMirrorStore({
       path: join(dir, 'geography.sqlite'),
@@ -110,6 +131,7 @@ export function createForm477Stores(dir: string): Form477Stores {
         name: 'TEXT',
       },
       indexes: [{ columns: ['type', 'geoid'] }],
+      limits: { limit: MAX_SCAN_ROWS },
     }),
     providerDim: sqliteMirrorStore({
       path: join(dir, 'providers.sqlite'),
@@ -124,6 +146,7 @@ export function createForm477Stores(dir: string): Form477Stores {
       },
       fts: ['holdingcompanyname'],
       indexes: [{ columns: ['hoconum'] }],
+      limits: { limit: MAX_PROVIDER_SEARCH_ROWS },
     }),
   };
 }

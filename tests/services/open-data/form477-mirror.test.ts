@@ -2,9 +2,10 @@
  * @fileoverview Tests for the Form 477 mirror routing and coverage gates:
  * mirror hits for covered states, silent live fallback for uncovered states,
  * full-corpus gating for cross-key aggregations, the state-prefix LIKE → range
- * rewrite, the provider-dimension query path, and byte-identical passthrough
- * when the mirror is absent. Stores are seeded in a temp directory through the
- * real store API with fixtures mirroring the live Socrata column names.
+ * rewrite, the provider-dimension query path, the per-store query ceilings, and
+ * byte-identical passthrough when the mirror is absent. Stores are seeded in a
+ * temp directory through the real store API with fixtures mirroring the live
+ * Socrata column names.
  * @module tests/services/open-data/form477-mirror.test
  */
 
@@ -13,12 +14,21 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Context } from '@cyanheads/mcp-ts-core';
 import type { AppConfig } from '@cyanheads/mcp-ts-core/config';
+import { JsonRpcErrorCode, McpError } from '@cyanheads/mcp-ts-core/errors';
 import type { StorageService } from '@cyanheads/mcp-ts-core/storage';
 import { createMockContext } from '@cyanheads/mcp-ts-core/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ServerConfig } from '@/config/server-config.js';
 import { Form477Mirror } from '@/services/open-data/mirror/form477-mirror.js';
-import { FULL_SCOPE, markCovered, stateScope } from '@/services/open-data/mirror/stores.js';
+import {
+  type Form477Stores,
+  FULL_SCOPE,
+  MAX_PROVIDER_SEARCH_ROWS,
+  MAX_PROVIDER_SUMMARY_ROWS,
+  MAX_SCAN_ROWS,
+  markCovered,
+  stateScope,
+} from '@/services/open-data/mirror/stores.js';
 import { OpenDataService } from '@/services/open-data/open-data-service.js';
 
 const ctx: Context = createMockContext();
@@ -476,5 +486,153 @@ describe('geography lookups', () => {
     fetchMock.mockResolvedValueOnce(liveJson([]));
     await service.getGeographyNames('county', ['11001', '56001'], ctx);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('store query ceilings', () => {
+  /** Each store paired with the ceiling its spec declares. */
+  const STORE_CEILINGS: ReadonlyArray<[keyof Form477Stores, number]> = [
+    ['deployment', MAX_SCAN_ROWS],
+    ['area', MAX_SCAN_ROWS],
+    ['geography', MAX_SCAN_ROWS],
+    ['providerDim', MAX_PROVIDER_SEARCH_ROWS],
+    ['providerSummary', MAX_PROVIDER_SUMMARY_ROWS],
+  ];
+
+  for (const [name, ceiling] of STORE_CEILINGS) {
+    it(`serves a ${name} read at the declared ceiling of ${ceiling}`, async () => {
+      const { rows, total } = await mirror.stores[name].query({ limit: ceiling, offset: 0 });
+      expect(rows.length).toBeGreaterThan(0);
+      expect(total).toBe(rows.length);
+    });
+
+    it(`rejects a ${name} read one row above the ceiling`, async () => {
+      const outcome = await mirror.stores[name]
+        .query({ limit: ceiling + 1, offset: 0 })
+        .catch((error: unknown) => error);
+      expect(outcome).toBeInstanceOf(McpError);
+      expect(outcome).toMatchObject({
+        code: JsonRpcErrorCode.ValidationError,
+        data: { limit: ceiling + 1, max: ceiling },
+      });
+      expect((outcome as McpError).message).toBe(
+        `Mirror query limit must be an integer from 1 to ${ceiling}.`,
+      );
+    });
+  }
+
+  it('keeps every read path on the facade inside its store ceiling', async () => {
+    await markCovered(mirror.stores.deployment, FULL_SCOPE);
+    await expect(mirror.deploymentByBlock('110010001011000', {})).resolves.toHaveLength(2);
+    await expect(
+      mirror.areaSegments({
+        geographyType: 'county',
+        geographyId: '11001',
+        techFilter: 'acfosw',
+        speedDown: '25',
+      }),
+    ).resolves.toHaveLength(1);
+    await expect(
+      mirror.areaStatsBatch({
+        geographyType: 'county',
+        geographyIds: ['11001'],
+        techFilter: 'acfosw',
+        speedDown: '25',
+      }),
+    ).resolves.toHaveLength(1);
+    // 5,000 is what fcc_find_underserved drives through getAreaStatsByType.
+    await expect(
+      mirror.areaStatsByType({
+        geographyType: 'county',
+        techFilter: 'acfosw',
+        speedDown: '25',
+        stateFipsPrefix: '11',
+        maxRows: 5_000,
+      }),
+    ).resolves.toHaveLength(1);
+    await expect(mirror.geographyName('county', '11001')).resolves.toEqual({
+      value: 'District of Columbia, DC',
+    });
+    await expect(mirror.geographyNames('county', ['11001'])).resolves.toEqual(
+      new Map([['11001', 'District of Columbia, DC']]),
+    );
+    await expect(mirror.providerSummary('130235')).resolves.toMatchObject({
+      holdingCompanyName: 'Comcast Corporation',
+    });
+  });
+
+  it('accepts the widest provider search the service can ask for and rejects one row more', async () => {
+    await markCovered(mirror.stores.deployment, FULL_SCOPE);
+    // open-data-service.searchProviders: Math.min(limit ?? 50, 200) * 10.
+    const widest = 200 * 10;
+    await expect(
+      mirror.searchProviders({ nameSearch: 'comcast', rowLimit: widest }),
+    ).resolves.toHaveLength(3);
+    await expect(
+      mirror.searchProviders({ nameSearch: 'comcast', rowLimit: widest + 1 }),
+    ).rejects.toThrow(`Mirror query limit must be an integer from 1 to ${widest}.`);
+  });
+
+  it('enforces the provider-dimension ceiling on the relevance-sorted FTS path', async () => {
+    const relevance = { match: '"comcast"*', sort: 'relevance' } as const;
+    const { rows } = await mirror.stores.providerDim.query({
+      ...relevance,
+      limit: MAX_PROVIDER_SEARCH_ROWS,
+      offset: 0,
+    });
+    expect(rows).toHaveLength(3);
+    await expect(
+      mirror.stores.providerDim.query({
+        ...relevance,
+        limit: MAX_PROVIDER_SEARCH_ROWS + 1,
+        offset: 0,
+      }),
+    ).rejects.toThrow(
+      `Mirror query limit must be an integer from 1 to ${MAX_PROVIDER_SEARCH_ROWS}.`,
+    );
+  });
+
+  it('reports the full match count when the requested limit truncates the page', async () => {
+    const { rows, total } = await mirror.stores.area.query({ limit: 1, offset: 0 });
+    expect(rows).toHaveLength(1);
+    expect(total).toBe(3);
+  });
+
+  it('returns an empty page past the end of the match', async () => {
+    const { rows, total } = await mirror.stores.area.query({ limit: 1, offset: 10 });
+    expect(rows).toEqual([]);
+    expect(total).toBe(3);
+  });
+
+  it('returns an empty result at the ceiling for a filter that matches nothing', async () => {
+    const { rows, total } = await mirror.stores.deployment.query({
+      filters: [{ column: 'blockcode', op: 'eq', value: 'no-such-block' }],
+      limit: MAX_SCAN_ROWS,
+      offset: 0,
+    });
+    expect(rows).toEqual([]);
+    expect(total).toBe(0);
+  });
+
+  it('still rejects a malformed limit, and leaves offset unbounded', async () => {
+    const ranged = `Mirror query limit must be an integer from 1 to ${MAX_SCAN_ROWS}.`;
+    await expect(mirror.stores.area.query({ limit: 0, offset: 0 })).rejects.toThrow(ranged);
+    await expect(mirror.stores.area.query({ limit: 1.5, offset: 0 })).rejects.toThrow(ranged);
+    await expect(mirror.stores.area.query({ limit: 1, offset: -1 })).rejects.toThrow(
+      'Mirror query offset must be an integer of at least 0.',
+    );
+  });
+
+  it('leaves filter cardinality unbounded for the batched geography id lookup', async () => {
+    const ids = Array.from({ length: 100 }, (_, i) => `1100${String(i).padStart(2, '0')}`);
+    const { rows } = await mirror.stores.geography.query({
+      filters: [
+        { column: 'type', op: 'eq', value: 'county' },
+        { column: 'geoid', op: 'in', value: [...ids, '11001'] },
+      ],
+      limit: MAX_SCAN_ROWS,
+      offset: 0,
+    });
+    expect(rows).toHaveLength(1);
   });
 });

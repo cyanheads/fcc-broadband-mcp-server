@@ -29,10 +29,10 @@ import {
   type Form477Stores,
   FULL_SCOPE,
   isCovered,
+  MAX_PROVIDER_SUMMARY_ROWS,
+  MAX_SCAN_ROWS,
   stateScope,
 } from './stores.js';
-
-const MAX_ROWS = 50_000;
 
 function str(value: SqlValue | undefined): string | undefined {
   return value == null ? undefined : String(value);
@@ -140,7 +140,11 @@ export class Form477Mirror {
     } else if (options.consumer === false) {
       filters.push({ column: 'business', op: 'eq', value: '1' });
     }
-    const { rows } = await this.#stores.deployment.query({ filters, limit: MAX_ROWS, offset: 0 });
+    const { rows } = await this.#stores.deployment.query({
+      filters,
+      limit: MAX_SCAN_ROWS,
+      offset: 0,
+    });
     return rows.map((r) =>
       compact({
         blockcode: str(r.blockcode),
@@ -179,7 +183,7 @@ export class Form477Mirror {
     if (options.tribalFilter && options.tribalFilter !== 'all') {
       filters.push({ column: 'tribal_non', op: 'eq', value: options.tribalFilter });
     }
-    const { rows } = await this.#stores.area.query({ filters, limit: MAX_ROWS, offset: 0 });
+    const { rows } = await this.#stores.area.query({ filters, limit: MAX_SCAN_ROWS, offset: 0 });
     return rows.map(toRawAreaRow);
   }
 
@@ -204,7 +208,7 @@ export class Form477Mirror {
         { column: 'tech', op: 'eq', value: options.techFilter },
         { column: 'speed', op: 'eq', value: options.speedDown },
       ],
-      limit: MAX_ROWS,
+      limit: MAX_SCAN_ROWS,
       offset: 0,
     });
     return rows.map(toRawAreaRow);
@@ -238,7 +242,7 @@ export class Form477Mirror {
     }
     const { rows } = await this.#stores.area.query({
       filters,
-      limit: Math.min(options.maxRows, MAX_ROWS),
+      limit: Math.min(options.maxRows, MAX_SCAN_ROWS),
       offset: 0,
     });
     return rows.map(toRawAreaRow);
@@ -288,7 +292,7 @@ export class Form477Mirror {
     if (!(await this.#fullCorpus())) return;
     const dim = await this.#stores.providerDim.query({
       filters: [{ column: 'hoconum', op: 'eq', value: hoconum }],
-      limit: 1000,
+      limit: MAX_PROVIDER_SUMMARY_ROWS,
       offset: 0,
     });
     if (dim.rows.length === 0) return null;
@@ -298,7 +302,7 @@ export class Form477Mirror {
     ].sort();
     const summary = await this.#stores.providerSummary.query({
       filters: [{ column: 'hoconum', op: 'eq', value: hoconum }],
-      limit: 1000,
+      limit: MAX_PROVIDER_SUMMARY_ROWS,
       offset: 0,
     });
     const summaryRows = summary.rows.map((r) =>
@@ -354,7 +358,7 @@ export class Form477Mirror {
         { column: 'type', op: 'eq', value: type },
         { column: 'geoid', op: 'in', value: ids },
       ],
-      limit: MAX_ROWS,
+      limit: MAX_SCAN_ROWS,
       offset: 0,
     });
     const names = new Map<string, string>();
