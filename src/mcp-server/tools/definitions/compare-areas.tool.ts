@@ -63,6 +63,23 @@ const ALL_STATE_FIPS = [
   '56',
 ];
 
+/**
+ * Display label per sort metric, paired with what holding rank 1 means under
+ * it. Every metric ranks worst-first, but the sort direction that produces
+ * differs by the metric's polarity — the handler's comparator sorts the two
+ * unserved metrics descending and the two "good" shares ascending. A reader
+ * given only the metric name cannot tell an intentionally reversed comparator
+ * from a broken one, since coverage share is the exact complement of unserved
+ * share and the two orderings are always the same sequence. Naming the end
+ * rank 1 sits at is what separates them.
+ */
+const SORT_METRICS: Record<string, { label: string; rank1: string }> = {
+  unserved_pct: { label: 'Unserved %', rank1: 'highest unserved share' },
+  unserved_pop: { label: 'Unserved Population', rank1: 'largest unserved population' },
+  coverage_pct: { label: 'Coverage %', rank1: 'lowest coverage share' },
+  competitive_pct: { label: 'Competitive %', rank1: 'lowest competitive share' },
+};
+
 export const compareAreasTool = tool('fcc_compare_areas', {
   title: 'Compare Broadband Coverage Across Areas',
   description:
@@ -108,7 +125,7 @@ export const compareAreasTool = tool('fcc_compare_areas', {
       .enum(['unserved_pct', 'unserved_pop', 'coverage_pct', 'competitive_pct'])
       .default('unserved_pct')
       .describe(
-        '"unserved_pct" = share of population with no broadband (default). "unserved_pop" = raw headcount for BEAD funding. "coverage_pct" = share with any coverage. "competitive_pct" = share with 2+ providers.',
+        '"unserved_pct" = share of population with no broadband (default). "unserved_pop" = raw headcount for BEAD funding. "coverage_pct" = share with any coverage. "competitive_pct" = share with 2+ providers. Every option ranks worst-first, so rank 1 is the highest unserved share or headcount, or the lowest coverage or competitive share.',
       ),
   }),
 
@@ -271,7 +288,11 @@ export const compareAreasTool = tool('fcc_compare_areas', {
       };
     });
 
-    // Sort descending (worst first)
+    /*
+     * Worst first, so rank 1 is always the area most in need. Direction follows
+     * the metric's polarity: a high unserved share or headcount is bad, a high
+     * coverage or competitive share is good, so the latter two sort ascending.
+     */
     const sorted = enriched.sort((a, b) => {
       switch (input.sort_by) {
         case 'unserved_pct':
@@ -279,9 +300,9 @@ export const compareAreasTool = tool('fcc_compare_areas', {
         case 'unserved_pop':
           return b.noCoverage - a.noCoverage;
         case 'coverage_pct':
-          return b.coveragePct - a.coveragePct;
+          return a.coveragePct - b.coveragePct;
         case 'competitive_pct':
-          return b.competitivePct - a.competitivePct;
+          return a.competitivePct - b.competitivePct;
         default:
           return b.unservedPct - a.unservedPct;
       }
@@ -328,16 +349,18 @@ export const compareAreasTool = tool('fcc_compare_areas', {
   },
 
   format: (result) => {
-    const sortLabel: Record<string, string> = {
-      unserved_pct: 'Unserved %',
-      unserved_pop: 'Unserved Population',
-      coverage_pct: 'Coverage %',
-      competitive_pct: 'Competitive %',
-    };
+    /*
+     * An unrecognized sort key still names itself, but claims no direction —
+     * asserting one we cannot derive would be worse than leaving it unstated.
+     */
+    const metric = SORT_METRICS[result.sortBy];
+    const sortedBy = metric
+      ? `${metric.label} (worst first — rank 1 has the ${metric.rank1})`
+      : result.sortBy;
 
     const lines = [
       `## Broadband Coverage Comparison`,
-      `**Geography Type:** ${result.geographyType} | **Tech:** ${result.techFilter} | **Speed:** ${result.speedDownMbps} Mbps | **Sorted By:** ${sortLabel[result.sortBy] ?? result.sortBy}`,
+      `**Geography Type:** ${result.geographyType} | **Tech:** ${result.techFilter} | **Speed:** ${result.speedDownMbps} Mbps | **Sorted By:** ${sortedBy}`,
       `**Data Vintage:** ${result.dataVintage} | **Areas Compared:** ${result.totalAreas}`,
       '',
       `| Rank | Name (GEOID) | Total Pop | No Coverage | 1 Provider | 2 Providers | 3+ Providers | Unserved% | Coverage% | Competitive% |`,
