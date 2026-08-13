@@ -2,6 +2,10 @@
 
 All notable changes to this project. Each entry links to its full per-version file in [changelog/](changelog/).
 
+## [0.2.1](changelog/0.2.x/0.2.1.md) — 2026-08-13
+
+Broadband and technology lookups now resolve against the correct census vintage and the complete Form 477 taxonomy, nonexistent geographies are rejected instead of read as zero coverage, and BDC downloads validate as-of dates up front and page instead of returning every file at once.
+
 ## [0.2.0](changelog/0.2.x/0.2.0.md) — 2026-08-13 · ⚠️ Breaking
 
 Provider lookups and search no longer time out on the live FCC API, population figures are no longer overcounted, and the providers directory is now a paginated, named resource with a breaking URI change.
