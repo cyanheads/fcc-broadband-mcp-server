@@ -61,6 +61,15 @@ export interface DownloadFile {
   technologyType?: string;
 }
 
+/**
+ * First as-of date the Broadband Data Collection covers. Anything earlier is a
+ * Form 477 filing period, served by the Open Data tools rather than the BDC
+ * download manifests, so a date below this is rejected without credentials or a
+ * network call. Which dates BDC has published *since* is only knowable from the
+ * credentialed `/listAsOfDates` endpoint.
+ */
+export const BDC_FIRST_AS_OF_DATE = '2022-06-30';
+
 /** Hardcoded Form 477 filing periods (Jun 2015 – Jun 2021). */
 export const FORM477_PERIODS: FilingPeriod[] = [
   { asOfDate: '2021-06-30', source: 'form477' },

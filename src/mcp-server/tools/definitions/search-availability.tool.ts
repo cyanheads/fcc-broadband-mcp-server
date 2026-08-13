@@ -6,7 +6,7 @@
 import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
 import { getOpenDataService } from '@/services/open-data/open-data-service.js';
-import { TECH_CODE_LABELS } from '@/services/open-data/types.js';
+import { TECH_CODE_LABELS, TECH_CODES } from '@/services/open-data/types.js';
 
 export const searchAvailabilityTool = tool('fcc_search_availability', {
   title: 'Search Broadband Availability',
@@ -22,13 +22,13 @@ export const searchAvailabilityTool = tool('fcc_search_availability', {
       .string()
       .regex(/^\d{15}$/)
       .describe(
-        '15-digit census block FIPS code (e.g., "530330081021016"). Obtain from fcc_geocode_block using address coordinates.',
+        '15-digit census block FIPS code on 2010 census boundaries, the vintage this Form 477 dataset is keyed by (e.g., "530330081002024"). Obtain from fcc_geocode_block using address coordinates — a 2020-vintage block ID matches no deployment row.',
       ),
     tech_filter: z
-      .array(z.enum(['10', '11', '12', '40', '41', '42', '43', '50', '60', '70']))
+      .array(z.enum(TECH_CODES))
       .optional()
       .describe(
-        'Technology codes to filter. 50=Fiber to premises, 40–43=Cable modem, 10–12=DSL variants, 60=Satellite, 70=Fixed wireless. Omit to return all technologies.',
+        'Technology codes to filter, from the complete Form 477 taxonomy: 0=All other, 10=Asymmetric xDSL, 11=ADSL2, 12=VDSL, 20=Symmetric xDSL, 30=Other copper wireline, 40=Cable modem, 41=Cable modem DOCSIS 1/1.1/2.0, 42=Cable modem DOCSIS 3.0, 43=Cable modem DOCSIS 3.1, 50=Fiber to the end user, 60=Satellite, 70=Terrestrial fixed wireless, 90=Electric power line. Omit to return all technologies.',
       ),
     min_speed_down: z
       .number()
@@ -64,7 +64,9 @@ export const searchAvailabilityTool = tool('fcc_search_availability', {
             stateAbbr: z.string().describe('State where coverage is reported.'),
             techCode: z
               .string()
-              .describe('Technology code (e.g., "50" = fiber, "40" = cable, "60" = satellite).'),
+              .describe(
+                'FCC Form 477 technology code (e.g., "50" = fiber, "43" = cable DOCSIS 3.1, "60" = satellite).',
+              ),
             techLabel: z.string().describe('Human-readable technology description.'),
             maxDownloadMbps: z.number().describe('Maximum advertised download speed in Mbps.'),
             maxUploadMbps: z.number().describe('Maximum advertised upload speed in Mbps.'),

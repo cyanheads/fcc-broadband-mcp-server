@@ -12,6 +12,7 @@ export const geocodeBlockTool = tool('fcc_geocode_block', {
   description:
     'Converts a latitude/longitude coordinate to a 15-digit census block FIPS code, plus county FIPS, county name, state FIPS, state code, and state name. ' +
     'This is the required prerequisite for fcc_search_availability since the broadband dataset is indexed by census block, not address. ' +
+    'The block is resolved against 2010 census boundaries, the vintage the Form 477 deployment dataset is keyed by, so the returned blockFips can be passed straight to fcc_search_availability; a 2020-vintage block ID from another source will not match. ' +
     'Uses the FCC public Geo API — no authentication required.',
   annotations: { readOnlyHint: true, openWorldHint: false, idempotentHint: true },
 
@@ -36,7 +37,12 @@ export const geocodeBlockTool = tool('fcc_geocode_block', {
     blockFips: z
       .string()
       .describe(
-        '15-digit census block FIPS code (e.g., "530330081021016"). Pass this to fcc_search_availability to look up broadband providers.',
+        '15-digit census block FIPS code on 2010 census boundaries (e.g., "530330081002024"). Pass this to fcc_search_availability to look up broadband providers.',
+      ),
+    censusVintage: z
+      .string()
+      .describe(
+        'Decennial census whose block boundaries blockFips belongs to. Always "2010" — the vintage the Form 477 deployment dataset behind fcc_search_availability is keyed by.',
       ),
     countyFips: z
       .string()
@@ -77,11 +83,11 @@ export const geocodeBlockTool = tool('fcc_geocode_block', {
   format: (result) => {
     const lines = [
       `## Census Block Location`,
-      `**Block FIPS:** \`${result.blockFips}\``,
+      `**Block FIPS:** \`${result.blockFips}\` (${result.censusVintage} census boundaries)`,
       `**County:** ${result.countyName} (FIPS: ${result.countyFips})`,
       `**State:** ${result.stateName} (${result.stateCode}, FIPS: ${result.stateFips})`,
       ``,
-      `Use \`blockFips: "${result.blockFips}"\` with \`fcc_search_availability\` to look up broadband providers.`,
+      `Use \`blockFips: "${result.blockFips}"\` with \`fcc_search_availability\` to look up broadband providers — Form 477 deployment data is keyed by ${result.censusVintage} blocks.`,
     ];
     return [{ type: 'text', text: lines.join('\n') }];
   },

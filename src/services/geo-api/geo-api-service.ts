@@ -14,6 +14,14 @@ import type { BlockLocation, GeoApiBlockResponse } from './types.js';
 const BASE_URL = 'https://geo.fcc.gov/api/census';
 const TIMEOUT_MS = 15_000;
 
+/**
+ * Census vintage requested from the Area API. The API defaults to 2020, but the
+ * Form 477 deployment dataset every availability query reads is keyed by 2010
+ * blocks — an unpinned request returns a block ID that matches no deployment
+ * row. Pinned here so a geocoded block feeds fcc_search_availability directly.
+ */
+const CENSUS_YEAR = '2010';
+
 export class GeoApiService {
   constructor(
     readonly config: AppConfig,
@@ -21,13 +29,14 @@ export class GeoApiService {
   ) {}
 
   /**
-   * Converts a lat/lon coordinate to census block FIPS and geographic identifiers.
-   * Returns null when no block exists at the given coordinates (over water, outside US coverage).
+   * Converts a lat/lon coordinate to a {@link CENSUS_YEAR} census block FIPS and
+   * geographic identifiers. Returns null when no block exists at the given
+   * coordinates (over water, outside US coverage).
    */
   findBlock(latitude: number, longitude: number, ctx: Context): Promise<BlockLocation | null> {
     return withRetry(
       async () => {
-        const url = `${BASE_URL}/block/find?latitude=${latitude}&longitude=${longitude}&format=json`;
+        const url = `${BASE_URL}/block/find?latitude=${latitude}&longitude=${longitude}&censusYear=${CENSUS_YEAR}&format=json`;
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
         const signal = ctx.signal
@@ -59,19 +68,30 @@ export class GeoApiService {
         const stateName = raw.State?.name ?? '';
 
         if (blockFips.length !== 15) {
+          // Deterministic upstream shape error — the same coordinates return the
+          // same malformed FIPS, so retrying only delays the failure.
           throw serviceUnavailable(
             `FCC Geo API returned invalid block FIPS "${blockFips}" — expected 15 digits`,
-            { latitude, longitude, blockFips },
+            { latitude, longitude, blockFips, retryable: false },
           );
         }
 
         ctx.log.debug('GeoApiService.findBlock succeeded', {
           blockFips,
+          censusVintage: CENSUS_YEAR,
           countyFips,
           stateFips,
         });
 
-        return { blockFips, countyFips, countyName, stateFips, stateCode, stateName };
+        return {
+          blockFips,
+          censusVintage: CENSUS_YEAR,
+          countyFips,
+          countyName,
+          stateFips,
+          stateCode,
+          stateName,
+        };
       },
       {
         operation: 'GeoApiService.findBlock',

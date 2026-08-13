@@ -160,10 +160,10 @@ Each step is independently testable.
 ```ts
 {
   block_fips: z.string().regex(/^\d{15}$/)
-    .describe('15-digit census block FIPS code (e.g., "530330081021016"). Obtain from fcc_geocode_block using address coordinates.'),
-  tech_filter: z.array(z.enum(['10', '11', '12', '40', '41', '42', '43', '50', '60', '70']))
+    .describe('15-digit census block FIPS code on 2010 census boundaries (e.g., "530330081002024"). Obtain from fcc_geocode_block using address coordinates.'),
+  tech_filter: z.array(z.enum(TECH_CODES))
     .optional()
-    .describe('Technology codes to filter. 50=Fiber to premises, 40–43=Cable modem, 10–12=DSL variants, 60=Satellite, 70=Fixed wireless. Omit to return all technologies.'),
+    .describe('Technology codes to filter, from the complete Form 477 taxonomy: 0=All other, 10=Asymmetric xDSL, 11=ADSL2, 12=VDSL, 20=Symmetric xDSL, 30=Other copper wireline, 40=Cable modem, 41=Cable modem DOCSIS 1/1.1/2.0, 42=Cable modem DOCSIS 3.0, 43=Cable modem DOCSIS 3.1, 50=Fiber to the end user, 60=Satellite, 70=Terrestrial fixed wireless, 90=Electric power line. Omit to return all technologies.'),
   min_speed_down: z.number().min(0).optional()
     .describe('Minimum advertised download speed in Mbps to include. Omit to return all regardless of speed.'),
   consumer: z.boolean().optional()
@@ -187,8 +187,8 @@ Each step is independently testable.
     .describe('Partial holding company name to search (case-insensitive). e.g., "Comcast", "T-Mobile", "Frontier". Omit to list all providers in a state.'),
   state: z.string().regex(/^[A-Z]{2}$/).optional()
     .describe('2-letter state abbreviation to limit results to providers serving that state.'),
-  tech_filter: z.array(z.enum(['10', '11', '12', '40', '41', '42', '43', '50', '60', '70'])).optional()
-    .describe('Technology codes to filter. 50=Fiber, 40–43=Cable, 10–12=DSL, 60=Satellite, 70=Fixed wireless. Omit for all technologies.'),
+  tech_filter: z.array(z.enum(TECH_CODES)).optional()
+    .describe('Technology codes to filter, from the complete Form 477 taxonomy (0, 10–12, 20, 30, 40–43, 50, 60, 70, 90). Omit for all technologies.'),
   limit: z.number().int().min(1).max(200).default(50)
     .describe('Max providers to return.'),
 }
@@ -255,12 +255,20 @@ Each step is independently testable.
     .describe('Filter to one state\'s files.'),
   provider_name: z.string().optional()
     .describe('Partial provider holding company name to filter results.'),
+  limit: z.number().int().min(1).max(200).default(50)
+    .describe('Maximum number of files to return on one page.'),
+  offset: z.number().int().min(0).default(0)
+    .describe('Zero-based index of the first file to return, within the files matching the filters.'),
 }
 ```
 
+**Paging:** one as-of date can carry thousands of per-provider files, so the manifest comes back a page at a time. `output.totalFiles` counts every file matching the filters; the `offset`, `pageSize`, `count`, `nextOffset`, and `truncated` enrichment fields describe the page. `nextOffset` is present only while another page exists, and the notice separates an offset past the end from a filter set that matched nothing. Whether the BDC download endpoints accept paging parameters of their own is unestablished — the response envelope carries `result_count` but no cursor or offset field — so the window is cut server-side over the single upstream response.
+
+**As-of date validation** runs in two stages, split by what each one needs. A date that is not on the calendar, or that falls before `BDC_FIRST_AS_OF_DATE` (2022-06-30), is answerable from the string alone and is rejected ahead of the credentials check. Membership in the published set is only knowable from the credentialed `/listAsOfDates` endpoint, so it runs after that check; the answer is memoized for an hour so the check does not double every call against the API's 10-calls-per-minute budget.
+
 **Error contract:**
 - `credentials_required` (`Unauthorized`): `FCC_BDC_USERNAME` or `FCC_BDC_HASH_VALUE` env vars not set. Set them from the broadbandmap.fcc.gov "Manage API Access" page.
-- `invalid_as_of_date` (`InvalidParams`): Date not in the list returned by `fcc_list_filing_periods`. Valid dates are semi-annual (June 30 and December 31, starting June 2022).
+- `invalid_as_of_date` (`ValidationError`): the date is not on the calendar, predates the first BDC filing period, or is not among the as-of dates the BDC API publishes. The thrown `recovery.hint` says which of the three it was.
 
 ---
 
@@ -297,7 +305,7 @@ Multiple rows per geography — one per `urban_rural` × `tribal_non` combinatio
 
 Key fields: `blockcode` (15-digit FIPS), `provider_id`, `frn`, `providername`, `holdingcompanyname`, `hoconum`, `stateabbr`, `techcode`, `maxaddown`, `maxadup`, `consumer`, `business`.
 
-Tech codes: 10–12 = DSL variants, 40–43 = Cable modem, 50 = Fiber to premises, 60 = Satellite, 70 = Fixed wireless.
+Tech codes: 0 = All other, 10–12 = DSL (ADSL, ADSL2, VDSL), 20 = DSL (symmetric xDSL), 30 = Other copper wireline, 40–43 = Cable modem (unqualified, DOCSIS 1/1.1/2.0, DOCSIS 3.0, DOCSIS 3.1), 50 = Fiber to premises, 60 = Satellite, 70 = Fixed wireless, 90 = Electric power line. `TECH_CODES` and `TECH_CODE_LABELS` in `src/services/open-data/types.ts` are the single source — the dataset's own `techcode` column definition is quoted there.
 
 ---
 
@@ -382,11 +390,13 @@ SoQL query parameters:
 
 ### FCC Geo API
 
-`GET https://geo.fcc.gov/api/census/block/find?latitude={lat}&longitude={lon}&format=json`
+`GET https://geo.fcc.gov/api/census/block/find?latitude={lat}&longitude={lon}&censusYear=2010&format=json`
 
 Returns: `Block.FIPS` (15-digit census block), `County.FIPS`, `County.name`, `State.FIPS`, `State.code`, `State.name`
 
 No auth required. No documented rate limit.
+
+`censusYear` is pinned to 2010. The API defaults to 2020, but the deployment table (`jdr4-3q4p`) is keyed by 2010 blocks — an unpinned request returns a well-formed block ID that matches no deployment row, so the geocode → availability chain fails with `block_not_found`.
 
 ### BDC Public Data API
 

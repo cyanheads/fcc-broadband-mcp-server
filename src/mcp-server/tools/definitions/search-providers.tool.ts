@@ -6,6 +6,7 @@
 import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
 import { getOpenDataService } from '@/services/open-data/open-data-service.js';
+import { TECH_CODES } from '@/services/open-data/types.js';
 
 export const searchProvidersTool = tool('fcc_search_providers', {
   title: 'Search Broadband Providers',
@@ -34,10 +35,10 @@ export const searchProvidersTool = tool('fcc_search_providers', {
         '2-letter state abbreviation (e.g., "WA") to limit results to providers serving that state. Matches individual deployment filings, so every filter given must hold on one filing together — a provider is returned for state="WA" with tech_filter=["50"] only if it filed fiber in Washington, not if it filed fiber elsewhere and something else in Washington.',
       ),
     tech_filter: z
-      .array(z.enum(['10', '11', '12', '40', '41', '42', '43', '50', '60', '70']))
+      .array(z.enum(TECH_CODES))
       .optional()
       .describe(
-        'Technology codes to filter. 50=Fiber, 40–43=Cable, 10–12=DSL, 60=Satellite, 70=Fixed wireless. Omit for all technologies. Matches individual deployment filings like state does, so pairing this with name_search narrows to filings made under the matched name — a holding company that files some technologies under an acquired brand name can come back empty here while its techCodes list the technology. To ask what one company deploys, search the name alone and read techCodes off the result.',
+        'Technology codes to filter, from the complete Form 477 taxonomy: 0=All other, 10=Asymmetric xDSL, 11=ADSL2, 12=VDSL, 20=Symmetric xDSL, 30=Other copper wireline, 40=Cable modem, 41=Cable modem DOCSIS 1/1.1/2.0, 42=Cable modem DOCSIS 3.0, 43=Cable modem DOCSIS 3.1, 50=Fiber to the end user, 60=Satellite, 70=Terrestrial fixed wireless, 90=Electric power line. Omit for all technologies. Matches individual deployment filings like state does, so pairing this with name_search narrows to filings made under the matched name — a holding company that files some technologies under an acquired brand name can come back empty here while its techCodes list the technology. To ask what one company deploys, search the name alone and read techCodes off the result.',
       ),
     limit: z
       .number()

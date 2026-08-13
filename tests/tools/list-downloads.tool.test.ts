@@ -29,10 +29,24 @@ const MOCK_FILE = {
   asOfDate: '2024-06-30',
 };
 
+/** The `{ files, total }` page the service hands back. */
+function page(files: unknown[], total = files.length) {
+  return { files, total };
+}
+
+/** `count` files that differ only by identity fields, numbered from `from`. */
+function filesFrom(from: number, count: number) {
+  return Array.from({ length: count }, (_, i) => ({
+    ...MOCK_FILE,
+    fileId: `file-${from + i}`,
+    fileName: `bdc_provider_${from + i}.zip`,
+  }));
+}
+
 describe('listDownloadsTool', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockListDownloads.mockResolvedValue([MOCK_FILE]);
+    mockListDownloads.mockResolvedValue(page([MOCK_FILE]));
   });
 
   // Happy path
@@ -102,7 +116,7 @@ describe('listDownloadsTool', () => {
   });
 
   it('enriches with notice when no files match filters', async () => {
-    mockListDownloads.mockResolvedValue([]);
+    mockListDownloads.mockResolvedValue(page([]));
     const ctx = createMockContext({ errors: listDownloadsTool.errors });
     const input = listDownloadsTool.input.parse({
       as_of_date: '2024-06-30',
@@ -128,13 +142,30 @@ describe('listDownloadsTool', () => {
     });
   });
 
-  it('propagates invalid_as_of_date error from service', async () => {
+  it('propagates the reason and recovery of an invalid_as_of_date error', async () => {
     mockListDownloads.mockRejectedValue(
-      Object.assign(new Error('invalid date'), { code: JsonRpcErrorCode.ValidationError }),
+      Object.assign(new Error('invalid date'), {
+        code: JsonRpcErrorCode.ValidationError,
+        data: {
+          reason: 'invalid_as_of_date',
+          asOfDate: '2024-13-99',
+          recovery: { hint: 'Pass a YYYY-MM-DD date.' },
+        },
+      }),
     );
     const ctx = createMockContext({ errors: listDownloadsTool.errors });
     const input = listDownloadsTool.input.parse({ as_of_date: '2024-06-30' });
-    await expect(listDownloadsTool.handler(input, ctx)).rejects.toThrow();
+    await expect(listDownloadsTool.handler(input, ctx)).rejects.toMatchObject({
+      code: JsonRpcErrorCode.ValidationError,
+      data: { reason: 'invalid_as_of_date', recovery: { hint: 'Pass a YYYY-MM-DD date.' } },
+    });
+  });
+
+  it('declares invalid_as_of_date as a validation failure with recovery guidance', () => {
+    const contract = listDownloadsTool.errors!.find((e) => e.reason === 'invalid_as_of_date')!;
+    expect(contract.code).toBe(JsonRpcErrorCode.ValidationError);
+    expect(contract.when).toMatch(/calendar/);
+    expect(contract.recovery).toMatch(/fcc_list_filing_periods/);
   });
 
   // Input validation
@@ -182,7 +213,7 @@ describe('listDownloadsTool', () => {
 
   // Edge cases
   it('handles empty file list without error', async () => {
-    mockListDownloads.mockResolvedValue([]);
+    mockListDownloads.mockResolvedValue(page([]));
     const ctx = createMockContext({ errors: listDownloadsTool.errors });
     const input = listDownloadsTool.input.parse({ as_of_date: '2024-06-30' });
     const result = await listDownloadsTool.handler(input, ctx);
@@ -198,7 +229,7 @@ describe('listDownloadsTool', () => {
       downloadUrl: 'https://broadbandmap.fcc.gov/file/bdc_national_summary.csv',
       asOfDate: '2024-06-30',
     };
-    mockListDownloads.mockResolvedValue([sparseFile]);
+    mockListDownloads.mockResolvedValue(page([sparseFile]));
     const ctx = createMockContext({ errors: listDownloadsTool.errors });
     const input = listDownloadsTool.input.parse({ as_of_date: '2024-06-30' });
     const result = await listDownloadsTool.handler(input, ctx);
@@ -209,19 +240,151 @@ describe('listDownloadsTool', () => {
     expect(result.files[0]!.fileSizeBytes).toBeUndefined();
   });
 
-  it('handles large file count correctly', async () => {
-    const manyFiles = Array.from({ length: 100 }, (_, i) => ({
-      ...MOCK_FILE,
-      fileId: `file-${i}`,
-      fileName: `bdc_state_${i}.zip`,
-    }));
-    mockListDownloads.mockResolvedValue(manyFiles);
+  // Pagination — the page window, and the four shapes an answer can take:
+  // complete, partial, exhausted, and empty.
+  it('passes the requested page window to the service', async () => {
+    const ctx = createMockContext({ errors: listDownloadsTool.errors });
+    const input = listDownloadsTool.input.parse({
+      as_of_date: '2024-06-30',
+      limit: 25,
+      offset: 50,
+    });
+    await listDownloadsTool.handler(input, ctx);
+    expect(mockListDownloads).toHaveBeenCalledWith(
+      expect.objectContaining({ limit: 25, offset: 50 }),
+      ctx,
+    );
+  });
+
+  it('defaults the page window to the first 50 files', async () => {
+    const ctx = createMockContext({ errors: listDownloadsTool.errors });
+    const input = listDownloadsTool.input.parse({ as_of_date: '2024-06-30' });
+    await listDownloadsTool.handler(input, ctx);
+    expect(mockListDownloads).toHaveBeenCalledWith(
+      expect.objectContaining({ limit: 50, offset: 0 }),
+      ctx,
+    );
+  });
+
+  it('rejects a limit above the cap and a negative offset', () => {
+    expect(() => listDownloadsTool.input.parse({ as_of_date: '2024-06-30', limit: 201 })).toThrow();
+    expect(() => listDownloadsTool.input.parse({ as_of_date: '2024-06-30', offset: -1 })).toThrow();
+  });
+
+  // Rewritten from the pre-pagination assertion that 100 mock files came back as
+  // 100 unbounded. A 100-file manifest is now the over-cap case: one page of 50,
+  // totalFiles describing all 100, and a nextOffset to walk with.
+  it('returns one capped page of a larger manifest and points at the next', async () => {
+    mockListDownloads.mockResolvedValue(page(filesFrom(0, 50), 100));
     const ctx = createMockContext({ errors: listDownloadsTool.errors });
     const input = listDownloadsTool.input.parse({ as_of_date: '2024-06-30' });
     const result = await listDownloadsTool.handler(input, ctx);
+
+    expect(result.files).toHaveLength(50);
     expect(result.totalFiles).toBe(100);
-    expect(result.files).toHaveLength(100);
+
+    const enrichment = getEnrichment(ctx);
+    expect(enrichment).toMatchObject({
+      offset: 0,
+      pageSize: 50,
+      count: 50,
+      nextOffset: 50,
+      truncated: true,
+    });
+    expect(enrichment.notice as string).toContain('offset=50');
+    expect(enrichment.notice as string).toContain('1–50 of 100');
   });
+
+  it('omits nextOffset on the last page', async () => {
+    mockListDownloads.mockResolvedValue(page(filesFrom(50, 50), 100));
+    const ctx = createMockContext({ errors: listDownloadsTool.errors });
+    const input = listDownloadsTool.input.parse({ as_of_date: '2024-06-30', offset: 50 });
+    const result = await listDownloadsTool.handler(input, ctx);
+
+    expect(result.totalFiles).toBe(100);
+    const enrichment = getEnrichment(ctx);
+    expect(enrichment.nextOffset).toBeUndefined();
+    expect(enrichment.truncated).toBe(true);
+    expect(enrichment.notice as string).toContain('last page');
+  });
+
+  it('reports a complete result as untruncated with no continuation', async () => {
+    mockListDownloads.mockResolvedValue(page(filesFrom(0, 10), 10));
+    const ctx = createMockContext({ errors: listDownloadsTool.errors });
+    const input = listDownloadsTool.input.parse({ as_of_date: '2024-06-30' });
+    await listDownloadsTool.handler(input, ctx);
+
+    const enrichment = getEnrichment(ctx);
+    expect(enrichment.truncated).toBe(false);
+    expect(enrichment.nextOffset).toBeUndefined();
+    expect(enrichment.notice as string).toContain('1–10 of 10');
+  });
+
+  it('fills an exact-cap page and still offers the next one', async () => {
+    mockListDownloads.mockResolvedValue(page(filesFrom(0, 25), 50));
+    const ctx = createMockContext({ errors: listDownloadsTool.errors });
+    const input = listDownloadsTool.input.parse({ as_of_date: '2024-06-30', limit: 25 });
+    await listDownloadsTool.handler(input, ctx);
+
+    const enrichment = getEnrichment(ctx);
+    expect(enrichment).toMatchObject({ count: 25, pageSize: 25, nextOffset: 25, truncated: true });
+  });
+
+  it('distinguishes an offset past the end from a search that matched nothing', async () => {
+    mockListDownloads.mockResolvedValue(page([], 100));
+    const ctx = createMockContext({ errors: listDownloadsTool.errors });
+    const input = listDownloadsTool.input.parse({ as_of_date: '2024-06-30', offset: 500 });
+    const result = await listDownloadsTool.handler(input, ctx);
+
+    expect(result.files).toHaveLength(0);
+    expect(result.totalFiles).toBe(100);
+
+    const enrichment = getEnrichment(ctx);
+    expect(enrichment.count).toBe(0);
+    expect(enrichment.nextOffset).toBeUndefined();
+    const notice = enrichment.notice as string;
+    expect(notice).toContain('past the end');
+    expect(notice).toContain('offset=0');
+    expect(notice).not.toContain('No files found');
+  });
+
+  it('says nothing matched when the filtered set is empty', async () => {
+    mockListDownloads.mockResolvedValue(page([], 0));
+    const ctx = createMockContext({ errors: listDownloadsTool.errors });
+    const input = listDownloadsTool.input.parse({ as_of_date: '2024-06-30', state: 'ZZ' });
+    await listDownloadsTool.handler(input, ctx);
+
+    const enrichment = getEnrichment(ctx);
+    expect(enrichment.truncated).toBe(false);
+    expect(enrichment.nextOffset).toBeUndefined();
+    const notice = enrichment.notice as string;
+    expect(notice).toContain('No files found');
+    expect(notice).not.toContain('past the end');
+  });
+
+  /*
+   * `truncated` and `notice` are required enrichment fields, so a page shape that
+   * leaves either unpopulated fails the effective-output parse at runtime rather
+   * than in any assertion above. Parse each shape against the schema the
+   * framework advertises — output.extend(enrichment) — to catch that here.
+   */
+  it.each([
+    ['complete', page(filesFrom(0, 10), 10), 0],
+    ['partial', page(filesFrom(0, 50), 100), 0],
+    ['exhausted', page([], 100), 500],
+    ['empty', page([], 0), 0],
+  ])(
+    'emits a %s page that satisfies the advertised output schema',
+    async (_label, result, offset) => {
+      mockListDownloads.mockResolvedValue(result);
+      const ctx = createMockContext({ errors: listDownloadsTool.errors });
+      const input = listDownloadsTool.input.parse({ as_of_date: '2024-06-30', offset });
+      const output = await listDownloadsTool.handler(input, ctx);
+
+      const effective = listDownloadsTool.output.extend(listDownloadsTool.enrichment!);
+      expect(() => effective.parse({ ...output, ...getEnrichment(ctx) })).not.toThrow();
+    },
+  );
 
   // Format output
   it('formats output with file details', () => {
@@ -248,6 +411,23 @@ describe('listDownloadsTool', () => {
     expect(text).toContain('availability');
   });
 
+  it('formats a partial page as a slice of the matching set', () => {
+    const output = {
+      files: filesFrom(0, 3),
+      totalFiles: 100,
+      asOfDate: '2024-06-30',
+      dataType: 'availability',
+    };
+    const text = (listDownloadsTool.format!(output)[0] as { text: string }).text;
+    // The page count and the set total are both on the content[] surface, so a
+    // format()-only client cannot read three files as the whole manifest.
+    expect(text).toContain('3 of 100');
+    for (const file of output.files) {
+      expect(text).toContain(file.fileId);
+      expect(text).toContain(file.downloadUrl);
+    }
+  });
+
   it('formats empty file list with fallback text', () => {
     const output = {
       files: [],
@@ -258,6 +438,18 @@ describe('listDownloadsTool', () => {
     const blocks = listDownloadsTool.format!(output);
     const text = (blocks[0] as { text: string }).text;
     expect(text).toContain('No files found matching the filters');
+  });
+
+  it('formats an exhausted page as past the end, not as no match', () => {
+    const output = {
+      files: [],
+      totalFiles: 100,
+      asOfDate: '2024-06-30',
+      dataType: 'availability',
+    };
+    const text = (listDownloadsTool.format!(output)[0] as { text: string }).text;
+    expect(text).toContain('past the end of the 100 matching files');
+    expect(text).not.toContain('No files found matching the filters');
   });
 
   it('formats file without optional fields gracefully', () => {

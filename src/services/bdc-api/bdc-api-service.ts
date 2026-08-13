@@ -12,6 +12,7 @@ import type { StorageService } from '@cyanheads/mcp-ts-core/storage';
 import { httpErrorFromResponse, withRetry } from '@cyanheads/mcp-ts-core/utils';
 import type { ServerConfig } from '@/config/server-config.js';
 import {
+  BDC_FIRST_AS_OF_DATE,
   type BdcApiEnvelope,
   type BdcAsOfDate,
   type BdcDownloadFile,
@@ -23,7 +24,70 @@ import {
 const BASE_URL = 'https://bdc.fcc.gov/api/public/map';
 const TIMEOUT_MS = 30_000;
 
+/**
+ * How long a fetched as-of-date set stays usable. BDC publishes a new as-of date
+ * twice a year, so any short window is generous; the point is to keep the
+ * membership check from doubling every `listDownloads` call against the API's
+ * 10-calls-per-minute budget. Nothing about the set is tenant-specific — the
+ * credentials are process-wide environment variables — so one memo per service
+ * instance serves every caller.
+ */
+const AS_OF_DATES_TTL_MS = 60 * 60 * 1000;
+
+/** How many published dates an `invalid_as_of_date` message names back. */
+const SUGGESTED_DATE_COUNT = 6;
+
+/** True when the string names a date the calendar actually has. */
+function isRealCalendarDate(value: string): boolean {
+  const [year, month, day] = value.split('-').map(Number) as [number, number, number];
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  return (
+    parsed.getUTCFullYear() === year &&
+    parsed.getUTCMonth() === month - 1 &&
+    parsed.getUTCDate() === day
+  );
+}
+
+/**
+ * Rejects an as-of date that is wrong on its face — a string the calendar has no
+ * day for, or one earlier than BDC itself. Both are answerable from the string
+ * alone, which is why this runs ahead of the credentials gate: a deployment with
+ * no BDC account still learns its date is malformed instead of being told it
+ * needs credentials to find out. Membership in the published set is a separate,
+ * credentialed check.
+ */
+function assertWellFormedAsOfDate(asOfDate: string): void {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(asOfDate) || !isRealCalendarDate(asOfDate)) {
+    throw validationError(
+      `Invalid as_of_date "${asOfDate}" — not a date on the calendar. Expected YYYY-MM-DD (e.g., "${BDC_FIRST_AS_OF_DATE}").`,
+      {
+        reason: 'invalid_as_of_date',
+        asOfDate,
+        recovery: {
+          hint: `"${asOfDate}" is not a real calendar date. Pass a YYYY-MM-DD date, or call fcc_list_filing_periods with include_bdc=true to read the dates BDC publishes.`,
+        },
+      },
+    );
+  }
+
+  if (asOfDate < BDC_FIRST_AS_OF_DATE) {
+    throw validationError(
+      `as_of_date "${asOfDate}" is earlier than the first Broadband Data Collection period, ${BDC_FIRST_AS_OF_DATE}.`,
+      {
+        reason: 'invalid_as_of_date',
+        asOfDate,
+        recovery: {
+          hint: `Dates before ${BDC_FIRST_AS_OF_DATE} are Form 477 filing periods, which have no BDC download manifest — query them with fcc_search_availability or fcc_get_coverage_summary instead. For BDC dates, call fcc_list_filing_periods with include_bdc=true.`,
+        },
+      },
+    );
+  }
+}
+
 export class BdcApiService {
+  /** Memoized `/listAsOfDates` answer backing the as-of date membership check. */
+  private _asOfDates: { dates: string[]; expiresAt: number } | undefined;
+
   constructor(
     readonly config: AppConfig,
     readonly storage: StorageService,
@@ -99,6 +163,28 @@ export class BdcApiService {
     );
   }
 
+  /** Reads the as-of dates the BDC API publishes. Requires credentials. */
+  private fetchAsOfDates(ctx: Context): Promise<BdcAsOfDate[] | string[]> {
+    return this.fetchBdc<BdcAsOfDate[] | string[]>(`${BASE_URL}/listAsOfDates`, ctx);
+  }
+
+  /**
+   * The as-of dates BDC publishes, memoized for {@link AS_OF_DATES_TTL_MS}. The
+   * credentialed `/listAsOfDates` endpoint is the only source for them, so this
+   * is the one date check that cannot run ahead of the credentials gate.
+   */
+  private async publishedAsOfDates(ctx: Context): Promise<string[]> {
+    const now = Date.now();
+    if (this._asOfDates && this._asOfDates.expiresAt > now) {
+      return this._asOfDates.dates;
+    }
+
+    const raw = await this.fetchAsOfDates(ctx);
+    const dates = raw.map((d) => (typeof d === 'string' ? d : d.as_of_date));
+    this._asOfDates = { dates, expiresAt: now + AS_OF_DATES_TTL_MS };
+    return dates;
+  }
+
   /**
    * Returns available filing periods. Always includes hardcoded Form 477 periods.
    */
@@ -109,8 +195,7 @@ export class BdcApiService {
       return periods;
     }
 
-    const url = `${BASE_URL}/listAsOfDates`;
-    const bdcDates = await this.fetchBdc<BdcAsOfDate[] | string[]>(url, ctx);
+    const bdcDates = await this.fetchAsOfDates(ctx);
 
     const bdcPeriods: FilingPeriod[] = bdcDates.map((d) => {
       if (typeof d === 'string') {
@@ -127,7 +212,12 @@ export class BdcApiService {
   }
 
   /**
-   * Lists downloadable BDC files for a specific as-of date.
+   * Lists one page of the downloadable BDC files for a specific as-of date.
+   *
+   * Validation runs in two stages, split by what it takes to detect each class
+   * of wrong date: {@link assertWellFormedAsOfDate} needs nothing but the string
+   * and so runs before the credentials gate, while membership in the published
+   * set is only knowable from the credentialed endpoint and runs after it.
    */
   async listDownloads(
     options: {
@@ -137,15 +227,28 @@ export class BdcApiService {
       technologyType?: string;
       state?: string;
       providerName?: string;
+      limit: number;
+      offset: number;
     },
     ctx: Context,
-  ): Promise<DownloadFile[]> {
+  ): Promise<{ files: DownloadFile[]; total: number }> {
+    assertWellFormedAsOfDate(options.asOfDate);
     this.requireCredentials();
 
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(options.asOfDate)) {
+    const published = await this.publishedAsOfDates(ctx);
+    if (!published.includes(options.asOfDate)) {
+      const recent = [...published]
+        .sort((a, b) => b.localeCompare(a))
+        .slice(0, SUGGESTED_DATE_COUNT);
       throw validationError(
-        `Invalid as_of_date format "${options.asOfDate}". Expected YYYY-MM-DD (e.g., "2024-06-30").`,
-        { reason: 'invalid_as_of_date', asOfDate: options.asOfDate },
+        `as_of_date "${options.asOfDate}" is not one of the ${published.length} as-of dates the BDC API publishes.`,
+        {
+          reason: 'invalid_as_of_date',
+          asOfDate: options.asOfDate,
+          recovery: {
+            hint: `Published BDC as-of dates include ${recent.join(', ')}. Call fcc_list_filing_periods with include_bdc=true for the full set.`,
+          },
+        },
       );
     }
 
@@ -178,20 +281,34 @@ export class BdcApiService {
       filtered = filtered.filter((f) => f.provider_name?.toLowerCase().includes(search));
     }
 
-    return filtered.map((f) => ({
-      fileId: f.file_id ?? f.id ?? '',
-      fileName: f.file_name ?? f.name ?? '',
-      category: f.category ?? '',
-      ...(f.subcategory && { subcategory: f.subcategory }),
-      ...(f.technology_type && { technologyType: f.technology_type }),
-      ...(f.state_name && { stateName: f.state_name }),
-      ...(f.state_abbr && { stateAbbr: f.state_abbr }),
-      ...(f.provider_name && { providerName: f.provider_name }),
-      ...(f.file_size !== undefined && { fileSizeBytes: f.file_size }),
-      ...(f.record_count !== undefined && { recordCount: f.record_count }),
-      downloadUrl: f.download_url ?? f.url ?? '',
-      asOfDate: f.as_of_date ?? options.asOfDate,
-    }));
+    /*
+     * The window is cut here, over the manifest the one upstream call already
+     * returned. Whether the BDC download endpoints accept paging parameters of
+     * their own is not established — the response envelope carries result_count
+     * but no cursor or offset field, and the Public Data API specification is not
+     * publicly retrievable — so nothing here assumes upstream paging. If it turns
+     * out to exist, the page window moves into the request and `total` comes off
+     * result_count; callers see the same shape either way.
+     */
+    const page = filtered.slice(options.offset, options.offset + options.limit);
+
+    return {
+      files: page.map((f) => ({
+        fileId: f.file_id ?? f.id ?? '',
+        fileName: f.file_name ?? f.name ?? '',
+        category: f.category ?? '',
+        ...(f.subcategory && { subcategory: f.subcategory }),
+        ...(f.technology_type && { technologyType: f.technology_type }),
+        ...(f.state_name && { stateName: f.state_name }),
+        ...(f.state_abbr && { stateAbbr: f.state_abbr }),
+        ...(f.provider_name && { providerName: f.provider_name }),
+        ...(f.file_size !== undefined && { fileSizeBytes: f.file_size }),
+        ...(f.record_count !== undefined && { recordCount: f.record_count }),
+        downloadUrl: f.download_url ?? f.url ?? '',
+        asOfDate: f.as_of_date ?? options.asOfDate,
+      })),
+      total: filtered.length,
+    };
   }
 }
 

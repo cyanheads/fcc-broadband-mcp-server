@@ -24,9 +24,15 @@ export interface GeoApiBlockResponse {
   status?: string;
 }
 
-/** Normalized census block location result. */
+/**
+ * Normalized census block location result. The Area API does not echo the
+ * census vintage it resolved against, so `censusVintage` records the year the
+ * request pinned — the decennial census whose block boundaries `blockFips`
+ * belongs to.
+ */
 export interface BlockLocation {
   blockFips: string;
+  censusVintage: string;
   countyFips: string;
   countyName: string;
   stateCode: string;

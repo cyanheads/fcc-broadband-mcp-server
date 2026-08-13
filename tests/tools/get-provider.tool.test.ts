@@ -60,8 +60,26 @@ describe('getProviderTool', () => {
     const result = await getProviderTool.handler(input, ctx);
     expect(result.hoconum).toBe('130317');
     expect(result.holdingCompanyName).toBe('Comcast Corporation');
-    expect(result.techCodes).toContain('41');
-    expect(result.techLabels).toContain('Cable modem (DOCSIS 3.0)');
+    expect(result.techCodes).toEqual(['41', '50']);
+    expect(result.techLabels).toEqual(['Cable modem (DOCSIS 1, 1.1, 2.0)', 'Fiber to premises']);
+  });
+
+  it('labels every FCC deployment technology code the provider reports', async () => {
+    mockGetProviderSummary.mockResolvedValue({
+      ...MOCK_SUMMARY,
+      techCodes: ['0', '20', '30', '42', '43', '90'],
+    });
+    const ctx = createMockContext({ errors: getProviderTool.errors });
+    const input = getProviderTool.input.parse({ hoconum: '130317' });
+    const result = await getProviderTool.handler(input, ctx);
+    expect(result.techLabels).toEqual([
+      'All other',
+      'DSL (symmetric xDSL)',
+      'Other copper wireline',
+      'Cable modem (DOCSIS 3.0)',
+      'Cable modem (DOCSIS 3.1)',
+      'Electric power line',
+    ]);
   });
 
   it('labels speed tiers with the FCC published thresholds', async () => {
@@ -117,7 +135,7 @@ describe('getProviderTool', () => {
       hoconum: '130317',
       holdingCompanyName: 'Comcast Corporation',
       techCodes: ['41', '50'],
-      techLabels: ['Cable modem (DOCSIS 3.0)', 'Fiber to premises'],
+      techLabels: ['Cable modem (DOCSIS 1, 1.1, 2.0)', 'Fiber to premises'],
       speedTierPopulation: [
         { tier: '25 Mbps', population: 120819661 },
         { tier: '100 Mbps', population: 120686133 },

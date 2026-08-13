@@ -33,7 +33,7 @@
 
 | Tool | Description |
 |:---|:---|
-| `fcc_geocode_block` | Converts a latitude/longitude coordinate to a census block FIPS code (15-digit), county FIPS, county name, state FIPS, state code, and state name. Required prerequisite for `fcc_search_availability`. |
+| `fcc_geocode_block` | Converts a latitude/longitude coordinate to a 2010-vintage census block FIPS code (15-digit), county FIPS, county name, state FIPS, state code, and state name. Required prerequisite for `fcc_search_availability`. |
 | `fcc_search_availability` | Queries broadband providers and advertised speeds at a census block, filtered by technology type and speed threshold. The starting point for any address-level broadband lookup. |
 | `fcc_get_coverage_summary` | Returns a broadband coverage summary for a geography — population with zero, one, two, or three-plus providers at a given speed threshold, split by urban/rural and tribal/non-tribal. |
 | `fcc_compare_areas` | Compares broadband coverage metrics across multiple geographies of the same type and returns a ranked table sorted by unserved or underserved population. |
@@ -48,7 +48,8 @@
 Convert geographic coordinates to a census block FIPS code for broadband availability lookups.
 
 - Calls the FCC Geo API — no auth required, no rate limit documented
-- Returns 15-digit block FIPS, 5-digit county FIPS, county name, state FIPS, 2-letter state code, and state name
+- Returns 15-digit block FIPS, its census vintage, 5-digit county FIPS, county name, state FIPS, 2-letter state code, and state name
+- Resolves against 2010 census boundaries — the vintage the Form 477 deployment dataset is keyed by, so the block feeds `fcc_search_availability` directly
 - Required first step before `fcc_search_availability` — the broadband deployment dataset is indexed by census block, not address
 
 ---
@@ -57,8 +58,8 @@ Convert geographic coordinates to a census block FIPS code for broadband availab
 
 Query which ISPs serve a specific census block and what speeds they advertise.
 
-- Requires a 15-digit census block FIPS; use `fcc_geocode_block` to convert coordinates first
-- Filter by technology code (fiber=50, cable=40–43, DSL=10–12, satellite=60, fixed wireless=70)
+- Requires a 15-digit census block FIPS on 2010 boundaries; use `fcc_geocode_block` to convert coordinates first
+- Filter by any Form 477 technology code — 0 (all other), 10/11/12 (asymmetric xDSL, ADSL2, VDSL), 20 (symmetric xDSL), 30 (other copper wireline), 40–43 (cable modem, unqualified through DOCSIS 3.1), 50 (fiber to the end user), 60 (satellite), 70 (terrestrial fixed wireless), 90 (electric power line)
 - Filter by minimum advertised download speed in Mbps
 - Filter to consumer-only or business-only service
 - Returns per-provider records with `hoconum`, `techcode`, `maxaddown`, `maxadup`, `consumer`, `business`
@@ -133,6 +134,8 @@ List BDC bulk data files available for download for a specific filing period.
 - Filter by data type (availability or challenge), file category, technology type, state, or provider name
 - Returns file metadata — provider, state, technology, record count — plus download URLs
 - Returns file manifests, not file contents; BDC CSVs are large zipped files not suitable for inline API response
+- Paged with `limit` (default 50, max 200) and `offset` — `totalFiles` counts every file matching the filters, and each response reports its offset, its file count, and a `nextOffset` to pass back, omitted on the last page
+- An `as_of_date` that is not a calendar date, or that falls before the first BDC period (2022-06-30), is rejected without credentials; a well-formed date BDC does not publish is rejected once credentials allow the published set to be read
 
 ## Resources and prompts
 

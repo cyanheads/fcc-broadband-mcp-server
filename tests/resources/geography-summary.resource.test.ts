@@ -3,6 +3,7 @@
  * @module tests/resources/geography-summary.resource.test
  */
 
+import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
 import { createMockContext } from '@cyanheads/mcp-ts-core/testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { geographySummaryResource } from '@/mcp-server/resources/definitions/geography-summary.resource.js';
@@ -71,15 +72,20 @@ describe('geographySummaryResource', () => {
     expect(result.segments).toHaveLength(1);
   });
 
-  // All valid geography types
-  it.each(['nation', 'state', 'county', 'cd', 'place', 'cbsa', 'tribal'])(
-    'accepts valid geography type "%s"',
-    async (geoType) => {
-      const ctx = createMockContext();
-      const result = await geographySummaryResource.handler({ type: geoType, id: '01' }, ctx);
-      expect(result.geography.type).toBe(geoType);
-    },
-  );
+  // All valid geography types, each with a well-shaped GEOID for its type
+  it.each([
+    ['nation', '0'],
+    ['state', '01'],
+    ['county', '01001'],
+    ['cd', '0101'],
+    ['place', '0107000'],
+    ['cbsa', '13820'],
+    ['tribal', 'T010'],
+  ])('accepts valid geography type "%s" with a well-shaped id', async (geoType, geoId) => {
+    const ctx = createMockContext();
+    const result = await geographySummaryResource.handler({ type: geoType, id: geoId }, ctx);
+    expect(result.geography.type).toBe(geoType);
+  });
 
   // Invalid geography type throws
   it('throws ValidationError for unrecognised geography type', async () => {
@@ -92,6 +98,86 @@ describe('geographySummaryResource', () => {
   it('throws ValidationError for empty string type', async () => {
     const ctx = createMockContext();
     await expect(geographySummaryResource.handler({ type: '', id: '28' }, ctx)).rejects.toThrow();
+  });
+
+  /*
+   * A mis-shaped or nonexistent GEOID used to return an all-zero success, which
+   * an agent cannot tell apart from a geography that genuinely has no coverage.
+   */
+  describe('GEOID validation', () => {
+    it.each([
+      ['state', '0601'],
+      ['county', '06'],
+      ['cd', '06037'],
+      ['cbsa', '310'],
+      ['place', '06440'],
+    ])(
+      'rejects geography type "%s" with mis-shaped id "%s" before querying',
+      async (geoType, geoId) => {
+        const ctx = createMockContext();
+        await expect(
+          geographySummaryResource.handler({ type: geoType, id: geoId }, ctx),
+        ).rejects.toMatchObject({ code: JsonRpcErrorCode.ValidationError });
+        expect(mockGetAreaSegments).not.toHaveBeenCalled();
+      },
+    );
+
+    it('names the county-FIPS correction when a 5-digit id is read as a state', async () => {
+      const ctx = createMockContext();
+      await expect(
+        geographySummaryResource.handler({ type: 'state', id: '06037' }, ctx),
+      ).rejects.toThrow(/county FIPS/);
+    });
+
+    it('rejects a non-numeric id', async () => {
+      const ctx = createMockContext();
+      await expect(
+        geographySummaryResource.handler({ type: 'state', id: 'CA' }, ctx),
+      ).rejects.toThrow(/not all digits/);
+    });
+
+    it('returns not-found with a recovery hint for a nonexistent GEOID', async () => {
+      mockGetAreaSegments.mockResolvedValue([]);
+      mockGetGeographyName.mockResolvedValue(undefined);
+      const ctx = createMockContext();
+      await expect(
+        geographySummaryResource.handler({ type: 'state', id: '99' }, ctx),
+      ).rejects.toMatchObject({
+        code: JsonRpcErrorCode.NotFound,
+        message: expect.stringContaining('99'),
+        data: { recovery: { hint: expect.stringMatching(/\w+/) } },
+      });
+    });
+
+    it('keeps a genuinely zero-population geography distinct from a nonexistent one', async () => {
+      mockGetAreaSegments.mockResolvedValue([
+        {
+          urbanRural: 'R' as const,
+          tribal: 'N' as const,
+          population: {
+            noCoverage: 0,
+            oneProvider: 0,
+            twoProviders: 0,
+            threeOrMore: 0,
+            total: 0,
+          },
+          coveragePct: 0,
+          unservedPct: 0,
+          competitivePct: 0,
+        },
+      ]);
+      const ctx = createMockContext();
+      const result = await geographySummaryResource.handler({ type: 'county', id: '28049' }, ctx);
+      expect(result.population.total).toBe(0);
+      expect(result.segments).toHaveLength(1);
+    });
+
+    it('reaches the service for nation-level reads, which carry no shape rule', async () => {
+      const ctx = createMockContext();
+      const result = await geographySummaryResource.handler({ type: 'nation', id: '0' }, ctx);
+      expect(result.geography.id).toBe('0');
+      expect(mockGetAreaSegments).toHaveBeenCalled();
+    });
   });
 
   // Percentages are computed correctly

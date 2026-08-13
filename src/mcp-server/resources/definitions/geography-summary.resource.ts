@@ -4,8 +4,9 @@
  */
 
 import { resource, z } from '@cyanheads/mcp-ts-core';
-import { validationError } from '@cyanheads/mcp-ts-core/errors';
+import { notFound, validationError } from '@cyanheads/mcp-ts-core/errors';
 import { getOpenDataService } from '@/services/open-data/open-data-service.js';
+import { geoidShapeError } from '@/services/open-data/types.js';
 
 export const geographySummaryResource = resource('fcc-broadband://geography/{type}/{id}/summary', {
   name: 'fcc-broadband-geography-summary',
@@ -22,7 +23,7 @@ export const geographySummaryResource = resource('fcc-broadband://geography/{typ
     id: z
       .string()
       .describe(
-        'FIPS GEOID. State: 2-digit (e.g., "06"). County: 5-digit (e.g., "06037"). Nation: "0".',
+        'FIPS GEOID, validated against the digit count its type expects. State: 2-digit (e.g., "06"). County: 5-digit (e.g., "06037"). Congressional district: 4-digit (e.g., "0601"). CBSA: 5-digit (e.g., "31080"). Place: 7-digit (e.g., "0644000"). Nation: "0". Tribal: BIA area ID.',
       ),
   }),
   output: z.object({
@@ -69,6 +70,17 @@ export const geographySummaryResource = resource('fcc-broadband://geography/{typ
       );
     }
 
+    if (params.type !== 'nation') {
+      const shapeError = geoidShapeError(params.type, params.id);
+      if (shapeError) {
+        throw validationError(shapeError, {
+          recovery: {
+            hint: 'Use the digit count the geography type expects: state=2, county=5, cd=4, cbsa=5, place=7.',
+          },
+        });
+      }
+    }
+
     const service = getOpenDataService();
     const [segments, geoName] = await Promise.all([
       service.getAreaSegments(
@@ -82,6 +94,22 @@ export const geographySummaryResource = resource('fcc-broadband://geography/{typ
       ),
       service.getGeographyName(params.type, params.id, ctx).catch(() => undefined),
     ]);
+
+    /*
+     * No Area Table rows at all means the GEOID identifies no geography — a
+     * distinct answer from a geography whose rows report zero population, which
+     * still comes back as segments and reads as genuine zero coverage below.
+     */
+    if (segments.length === 0) {
+      throw notFound(
+        `No area data found for geography type="${params.type}", id="${params.type === 'nation' ? '0' : params.id}". The GEOID matches no geography in the FCC Area Table.`,
+        {
+          recovery: {
+            hint: 'Verify the GEOID identifies a real geography of this type, or query a broader type such as county or state.',
+          },
+        },
+      );
+    }
 
     let totalNoCoverage = 0;
     let totalOne = 0;

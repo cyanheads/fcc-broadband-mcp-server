@@ -224,19 +224,57 @@ export interface ProviderSearchResult {
   scanTruncated: boolean;
 }
 
-/** FCC Form 477 technology code labels. */
+/**
+ * Every technology code the Form 477 deployment table emits, in the order the
+ * dataset's own `techcode` column definition lists them. Single source for the
+ * technology filters the tools expose, so an accepted code always has a label.
+ */
+export const TECH_CODES = [
+  '0',
+  '10',
+  '11',
+  '12',
+  '20',
+  '30',
+  '40',
+  '41',
+  '42',
+  '43',
+  '50',
+  '60',
+  '70',
+  '90',
+] as const;
+
+export type TechCode = (typeof TECH_CODES)[number];
+
+/**
+ * FCC Form 477 technology code labels, per the deployment dataset's `techcode`
+ * column definition (jdr4-3q4p): "10=Asymetrical xDSL | 11=ADSL2 | 12=VDSL |
+ * 20=Symetrical xDSL | 30=Other Copper Wireline | 40=Cable Modem | 41=Cable
+ * Modem-DOCSIS1,1.1, and 2.0 | 42=Cable Modem-DOCSIS 3.0 | 43=Cable
+ * Modem-DOCSIS 3.1 | 50=Optical Carrier/Fiber to the End User | 60=Satellite |
+ * 70=Terrestrial Fixed Wireless | 90=Electric Power Line | 0=All Other". The
+ * `satisfies` clause makes an unlabeled {@link TECH_CODES} entry a type error;
+ * the index signature keeps lookups by a raw upstream code assignable, since
+ * the dataset can emit a code its own definition does not document.
+ */
 export const TECH_CODE_LABELS: Record<string, string> = {
+  '0': 'All other',
   '10': 'DSL (ADSL)',
   '11': 'DSL (ADSL2)',
   '12': 'DSL (VDSL)',
-  '40': 'Cable modem (standard)',
-  '41': 'Cable modem (DOCSIS 3.0)',
-  '42': 'Cable modem (DOCSIS 3.1)',
-  '43': 'Cable modem (other)',
+  '20': 'DSL (symmetric xDSL)',
+  '30': 'Other copper wireline',
+  '40': 'Cable modem',
+  '41': 'Cable modem (DOCSIS 1, 1.1, 2.0)',
+  '42': 'Cable modem (DOCSIS 3.0)',
+  '43': 'Cable modem (DOCSIS 3.1)',
   '50': 'Fiber to premises',
   '60': 'Satellite',
   '70': 'Fixed wireless',
-};
+  '90': 'Electric power line',
+} satisfies Record<TechCode, string>;
 
 /**
  * Download speed thresholds for the provider summary's `d_1`–`d_8` columns, as
