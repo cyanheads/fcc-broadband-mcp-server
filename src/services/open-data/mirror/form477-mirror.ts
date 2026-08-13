@@ -17,6 +17,7 @@
 
 import type { QueryFilter, SqlValue } from '@cyanheads/mcp-ts-core/mirror';
 import type {
+  ProviderFootprint,
   RawAreaRow,
   RawDeploymentRow,
   RawProviderRow,
@@ -29,6 +30,7 @@ import {
   type Form477Stores,
   FULL_SCOPE,
   isCovered,
+  MAX_PROVIDER_SEARCH_ROWS,
   MAX_PROVIDER_SUMMARY_ROWS,
   MAX_SCAN_ROWS,
   stateScope,
@@ -286,16 +288,52 @@ export class Form477Mirror {
   }
 
   /**
-   * Everything getProviderSummary needs in one shot. `null` means the provider
-   * does not exist in the deployment corpus (an authoritative answer under the
-   * full-corpus marker); `undefined` means serve live.
+   * Every state and technology each holding company filed under, one indexed
+   * `hoconum` lookup at a time. {@link searchProviders} returns a bounded
+   * window of dimension rows, so the states and technologies visible inside
+   * that window are a subset of each company's footprint — this reads the whole
+   * footprint per company instead. A company spans at most a few hundred
+   * state × technology combinations, well inside the store's row ceiling.
+   *
+   * Every requested hoconum gets an entry; a company with no dimension rows
+   * gets an empty footprint rather than being left out of the map.
+   */
+  async providerFootprints(
+    hoconums: string[],
+  ): Promise<Map<string, ProviderFootprint> | undefined> {
+    if (!(await this.#fullCorpus())) return;
+    const footprints = new Map<string, ProviderFootprint>();
+    for (const hoconum of hoconums) {
+      const { rows } = await this.#stores.providerDim.query({
+        filters: [{ column: 'hoconum', op: 'eq', value: hoconum }],
+        limit: MAX_PROVIDER_SEARCH_ROWS,
+        offset: 0,
+      });
+      const states = new Set<string>();
+      const techs = new Set<string>();
+      for (const r of rows) {
+        const state = str(r.stateabbr);
+        const tech = str(r.techcode);
+        if (state) states.add(state);
+        if (tech) techs.add(tech);
+      }
+      footprints.set(hoconum, { states: [...states].sort(), techs: [...techs].sort() });
+    }
+    return footprints;
+  }
+
+  /**
+   * Everything getProviderSummary needs in one shot: the holding-company name
+   * from the provider dimension, and the raw summary rows — `tech` included, so
+   * the caller splits roll-ups from individual technologies the same way on
+   * both serving paths. `null` means the provider does not exist in the
+   * deployment corpus (an authoritative answer under the full-corpus marker);
+   * `undefined` means serve live.
    */
   async providerSummary(
     hoconum: string,
   ): Promise<
-    | { holdingCompanyName: string; techCodes: string[]; summaryRows: RawProviderSummaryRow[] }
-    | null
-    | undefined
+    { holdingCompanyName: string; summaryRows: RawProviderSummaryRow[] } | null | undefined
   > {
     if (!(await this.#fullCorpus())) return;
     const dim = await this.#stores.providerDim.query({
@@ -305,9 +343,6 @@ export class Form477Mirror {
     });
     if (dim.rows.length === 0) return null;
     const holdingCompanyName = str(dim.rows[0]?.holdingcompanyname) ?? '';
-    const techCodes = [
-      ...new Set(dim.rows.map((r) => str(r.techcode) ?? '').filter(Boolean)),
-    ].sort();
     const summary = await this.#stores.providerSummary.query({
       filters: [{ column: 'hoconum', op: 'eq', value: hoconum }],
       limit: MAX_PROVIDER_SUMMARY_ROWS,
@@ -324,9 +359,10 @@ export class Form477Mirror {
         d_7: str(r.d_7),
         d_8: str(r.d_8),
         hoconum: str(r.hoconum),
+        tech: str(r.tech),
       }),
     );
-    return { holdingCompanyName, techCodes, summaryRows };
+    return { holdingCompanyName, summaryRows };
   }
 
   /**

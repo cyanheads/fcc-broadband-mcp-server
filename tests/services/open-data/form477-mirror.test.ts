@@ -182,6 +182,11 @@ async function seedMirror(dir: string): Promise<Form477Mirror> {
     [],
   );
 
+  /*
+   * The live table's shape: the all-technology roll-up, an overlapping
+   * technology-family roll-up, and the individual technology rows both cover.
+   * Summing them would report 280 at d_1 against a real national total of 100.
+   */
   await providerSummary.applyBatch(
     [
       {
@@ -196,6 +201,45 @@ async function seedMirror(dir: string): Promise<Form477Mirror> {
         d_6: '60',
         d_7: '50',
         d_8: '40',
+      },
+      {
+        sid: 'ps-2',
+        hoconum: '130235',
+        tech: 'cable',
+        d_1: '80',
+        d_2: '80',
+        d_3: '70',
+        d_4: '60',
+        d_5: '50',
+        d_6: '40',
+        d_7: '30',
+        d_8: '20',
+      },
+      {
+        sid: 'ps-3',
+        hoconum: '130235',
+        tech: '43',
+        d_1: '80',
+        d_2: '80',
+        d_3: '70',
+        d_4: '60',
+        d_5: '50',
+        d_6: '40',
+        d_7: '30',
+        d_8: '20',
+      },
+      {
+        sid: 'ps-4',
+        hoconum: '130235',
+        tech: '50',
+        d_1: '20',
+        d_2: '20',
+        d_3: '20',
+        d_4: '20',
+        d_5: '20',
+        d_6: '20',
+        d_7: '20',
+        d_8: '20',
       },
     ],
     [],
@@ -419,22 +463,52 @@ describe('provider aggregations (full-corpus gate)', () => {
   it('serves searchProviders from the provider dimension under the full marker', async () => {
     await markCovered(mirror.stores.deployment, FULL_SCOPE);
     const service = makeService(mirror);
-    const providers = await service.searchProviders({ nameSearch: 'comcast' }, ctx);
+    const result = await service.searchProviders({ nameSearch: 'comcast' }, ctx);
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(providers).toHaveLength(1);
-    expect(providers[0]).toEqual({
+    expect(result.providers).toHaveLength(1);
+    expect(result.providers[0]).toEqual({
       hoconum: '130235',
       holdingCompanyName: 'Comcast Corporation',
       statesServed: ['DC', 'MD'],
       techCodes: ['43', '50'],
     });
+    // The FTS5 index reaches every match, so a mirror read this short is complete.
+    expect(result.matched).toBe(1);
+    expect(result.scanTruncated).toBe(false);
   });
 
   it('filters the dimension by state and tech', async () => {
     await markCovered(mirror.stores.deployment, FULL_SCOPE);
     const service = makeService(mirror);
-    const providers = await service.searchProviders({ state: 'DC', techCodes: ['50'] }, ctx);
+    const { providers } = await service.searchProviders({ state: 'DC', techCodes: ['50'] }, ctx);
     expect(providers.map((p) => p.hoconum).sort()).toEqual(['130235', '131425']);
+  });
+
+  it('reports each match’s whole footprint rather than the slice the filters selected', async () => {
+    await markCovered(mirror.stores.deployment, FULL_SCOPE);
+    const service = makeService(mirror);
+    const { providers } = await service.searchProviders({ state: 'DC', techCodes: ['50'] }, ctx);
+    // Comcast is here for its DC fiber row, but it also files cable in MD — the
+    // filters choose which companies come back, not what is true of them.
+    const comcast = providers.find((p) => p.hoconum === '130235');
+    expect(comcast?.statesServed).toEqual(['DC', 'MD']);
+    expect(comcast?.techCodes).toEqual(['43', '50']);
+  });
+
+  it('serves provider footprints from the dimension under the full marker', async () => {
+    await markCovered(mirror.stores.deployment, FULL_SCOPE);
+    // Every requested hoconum gets an entry — one absent from the corpus comes
+    // back empty rather than missing, so no company is left unresolved.
+    await expect(mirror.providerFootprints(['130235', '000000'])).resolves.toEqual(
+      new Map([
+        ['130235', { states: ['DC', 'MD'], techs: ['43', '50'] }],
+        ['000000', { states: [], techs: [] }],
+      ]),
+    );
+  });
+
+  it('declines provider footprints under partial coverage', async () => {
+    await expect(mirror.providerFootprints(['130235'])).resolves.toBeUndefined();
   });
 
   it('serves getProviderSummary from the mirror under the full marker', async () => {
@@ -442,11 +516,13 @@ describe('provider aggregations (full-corpus gate)', () => {
     const service = makeService(mirror);
     const summary = await service.getProviderSummary('130235', ctx);
     expect(fetchMock).not.toHaveBeenCalled();
+    // Roll-up rows excluded from the codes, and the population read off the
+    // all-technology row rather than summed across the four seeded rows.
     expect(summary).toEqual({
       hoconum: '130235',
       holdingCompanyName: 'Comcast Corporation',
       techCodes: ['43', '50'],
-      speedTierLocations: {
+      speedTierPopulation: {
         d_1: 100,
         d_2: 100,
         d_3: 90,
@@ -574,6 +650,9 @@ describe('store query ceilings', () => {
     await expect(mirror.providerSummary('130235')).resolves.toMatchObject({
       holdingCompanyName: 'Comcast Corporation',
     });
+    await expect(mirror.providerFootprints(['130235'])).resolves.toEqual(
+      new Map([['130235', { states: ['DC', 'MD'], techs: ['43', '50'] }]]),
+    );
   });
 
   it('rejects a type-wide scan above the store ceiling instead of clamping it', async () => {

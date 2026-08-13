@@ -12,7 +12,9 @@ export const getProviderTool = tool('fcc_get_provider', {
   title: 'Get Provider Profile',
   description:
     'Returns a national-level coverage profile for a specific holding company (by hoconum): ' +
-    'states served, technologies deployed, and the number of locations covered at each download speed tier. ' +
+    'technologies deployed and the population covered at each download speed tier. ' +
+    'Population figures come from the FCC provider summary table and count each person once, ' +
+    'regardless of how many technologies the provider uses to reach them. ' +
     'Use fcc_search_providers to find valid hoconum values. ' +
     'Data is from FCC Form 477 (as of June 2021).',
   annotations: { readOnlyHint: true, openWorldHint: false, idempotentHint: true },
@@ -20,26 +22,35 @@ export const getProviderTool = tool('fcc_get_provider', {
   input: z.object({
     hoconum: z
       .string()
+      .regex(/^\d+$/)
       .describe(
-        'Holding company number from fcc_search_providers (e.g., "130152" for Comcast). Required identifier for the provider.',
+        'Holding company number from fcc_search_providers — digits only, e.g. "130317" for Comcast Corporation.',
       ),
   }),
 
   output: z.object({
     hoconum: z.string().describe('Holding company number.'),
     holdingCompanyName: z.string().describe('Holding company name.'),
-    techCodes: z.array(z.string()).describe('Technology codes this provider deploys nationally.'),
+    techCodes: z
+      .array(z.string())
+      .describe(
+        'Technology codes this provider reports nationally. Empty when the provider reports no population coverage (e.g. business-only carriers).',
+      ),
     techLabels: z.array(z.string()).describe('Human-readable technology descriptions.'),
-    speedTierLocations: z
+    speedTierPopulation: z
       .array(
         z
           .object({
-            tier: z.string().describe('Speed tier label (e.g., "25 Mbps").'),
-            locationCount: z.number().describe('Number of locations with service at this tier.'),
+            tier: z.string().describe('Download speed threshold (e.g., "25 Mbps").'),
+            population: z
+              .number()
+              .describe('People covered at or above this download speed, counted once each.'),
           })
-          .describe('A speed tier with location count.'),
+          .describe('A speed tier with its covered population.'),
       )
-      .describe('Download speed tier location counts (national totals).'),
+      .describe(
+        'National covered population by download speed tier, from the FCC all-technology rollup. Tiers with no coverage are omitted; empty when the provider reports no population coverage.',
+      ),
     dataVintage: z.string().describe('Data vintage — Form 477 data as of June 2021.'),
   }),
 
@@ -50,6 +61,14 @@ export const getProviderTool = tool('fcc_get_provider', {
       when: 'No provider found with the given hoconum.',
       recovery:
         'Use fcc_search_providers with a holding company name to find valid hoconum values.',
+    },
+    {
+      reason: 'live_provider_timeout',
+      code: JsonRpcErrorCode.Timeout,
+      retryable: false,
+      when: 'A live FCC Open Data lookup exceeded its 30-second budget; the queries are point lookups, so a retry reaches the same result.',
+      recovery:
+        'FCC Open Data is not serving this lookup right now; try again later. Operators can enable the local Form 477 mirror (FCC_MIRROR_ENABLED=true) to serve provider profiles locally.',
     },
   ],
 
@@ -66,11 +85,11 @@ export const getProviderTool = tool('fcc_get_provider', {
       );
     }
 
-    const speedTierLocations = Object.entries(summary.speedTierLocations)
-      .filter(([, count]) => count > 0)
-      .map(([tier, count]) => ({
+    const speedTierPopulation = Object.entries(summary.speedTierPopulation)
+      .filter(([, population]) => population > 0)
+      .map(([tier, population]) => ({
         tier: SPEED_TIER_LABELS[tier] ?? tier,
-        locationCount: count,
+        population,
       }));
 
     const techLabels = summary.techCodes.map(
@@ -87,7 +106,7 @@ export const getProviderTool = tool('fcc_get_provider', {
       holdingCompanyName: summary.holdingCompanyName,
       techCodes: summary.techCodes,
       techLabels,
-      speedTierLocations,
+      speedTierPopulation,
       dataVintage: 'June 2021 (last Form 477 filing period)',
     };
   },
@@ -96,21 +115,27 @@ export const getProviderTool = tool('fcc_get_provider', {
     const lines = [
       `## Provider Profile — ${result.holdingCompanyName}`,
       `**Hoconum:** ${result.hoconum} | **Data Vintage:** ${result.dataVintage}`,
-      '',
-      `### Technologies Deployed`,
     ];
 
-    for (let i = 0; i < result.techCodes.length; i++) {
-      lines.push(`- **${result.techLabels[i]}** (code: ${result.techCodes[i]})`);
+    if (result.techCodes.length > 0) {
+      lines.push('', `### Technologies Deployed`);
+      for (let i = 0; i < result.techCodes.length; i++) {
+        lines.push(`- **${result.techLabels[i]}** (code: ${result.techCodes[i]})`);
+      }
     }
 
-    if (result.speedTierLocations.length > 0) {
-      lines.push('', '### Speed Tier Coverage (National Locations)');
-      lines.push('| Speed Tier | Locations |');
-      lines.push('|:-----------|:----------|');
-      for (const tier of result.speedTierLocations) {
-        lines.push(`| ${tier.tier} | ${tier.locationCount.toLocaleString()} |`);
+    if (result.speedTierPopulation.length > 0) {
+      lines.push('', '### Speed Tier Coverage (National Population)');
+      lines.push('| Speed Tier | Population |');
+      lines.push('|:-----------|:-----------|');
+      for (const tier of result.speedTierPopulation) {
+        lines.push(`| ${tier.tier} | ${tier.population.toLocaleString()} |`);
       }
+    } else {
+      lines.push(
+        '',
+        'No national population coverage is reported for this holding company in the FCC provider summary. Business-only carriers appear this way; use fcc_search_availability for their block-level deployments.',
+      );
     }
 
     return [{ type: 'text', text: lines.join('\n') }];

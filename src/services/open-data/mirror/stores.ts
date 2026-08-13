@@ -30,7 +30,12 @@ import {
 /** Scoped bulk scans — deployment by block, area by geography, geography names by id batch. */
 export const MAX_SCAN_ROWS = 50_000;
 
-/** Provider-dimension search — `search_providers` reads 10 dimension rows per result, capped at 200 results. */
+/**
+ * Provider-dimension reads — `search_providers` reads 10 dimension rows per
+ * result, capped at 200 results, then one whole-footprint read per returned
+ * company (bounded by the columns' own domains at 56 jurisdictions × 10
+ * technology codes).
+ */
 export const MAX_PROVIDER_SEARCH_ROWS = 2_000;
 
 /** The two single-provider lookups behind a provider summary. */
