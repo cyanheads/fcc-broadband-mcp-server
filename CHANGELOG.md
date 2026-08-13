@@ -2,6 +2,10 @@
 
 All notable changes to this project. Each entry links to its full per-version file in [changelog/](changelog/).
 
+## [0.2.0](changelog/0.2.x/0.2.0.md) — 2026-08-13 · ⚠️ Breaking
+
+Provider lookups and search no longer time out on the live FCC API, population figures are no longer overcounted, and the providers directory is now a paginated, named resource with a breaking URI change.
+
 ## [0.1.14](changelog/0.1.x/0.1.14.md) — 2026-08-13
 
 Four ranking and filtering fixes across `fcc_find_underserved` and `fcc_compare_areas`: territory-aware state validation (#15), a safer `min_unserved_pop` default (#17), an unbounded area scan (#22), and worst-first sorting under every compare metric (#23).

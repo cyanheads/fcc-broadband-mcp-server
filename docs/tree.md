@@ -1,6 +1,6 @@
 # fcc-broadband-mcp-server - Directory Structure
 
-Generated on: 2026-08-13 09:02:14
+Generated on: 2026-08-13 12:54:51
 
 ```text
 fcc-broadband-mcp-server/
@@ -23,6 +23,7 @@ fcc-broadband-mcp-server/
 │   └── settings.json
 ├── changelog/
 │   ├── 0.1.x/
+│   ├── 0.2.x/
 │   └── template.md
 ├── docs/
 │   ├── design.md

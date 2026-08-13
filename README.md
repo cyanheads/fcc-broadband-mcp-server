@@ -7,7 +7,7 @@
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/Version-0.1.14-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/users/cyanheads/packages/container/package/fcc-broadband-mcp-server) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-^1.30.0-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![npm](https://img.shields.io/npm/v/@cyanheads/fcc-broadband-mcp-server?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@cyanheads/fcc-broadband-mcp-server) [![TypeScript](https://img.shields.io/badge/TypeScript-^7.0.2-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.3.0-blueviolet.svg?style=flat-square)](https://bun.sh/)
+[![Version](https://img.shields.io/badge/Version-0.2.0-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/users/cyanheads/packages/container/package/fcc-broadband-mcp-server) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-^1.30.0-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![npm](https://img.shields.io/npm/v/@cyanheads/fcc-broadband-mcp-server?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@cyanheads/fcc-broadband-mcp-server) [![TypeScript](https://img.shields.io/badge/TypeScript-^7.0.2-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.3.0-blueviolet.svg?style=flat-square)](https://bun.sh/)
 
 </div>
 
@@ -38,8 +38,8 @@
 | `fcc_get_coverage_summary` | Returns a broadband coverage summary for a geography — population with zero, one, two, or three-plus providers at a given speed threshold, split by urban/rural and tribal/non-tribal. |
 | `fcc_compare_areas` | Compares broadband coverage metrics across multiple geographies of the same type and returns a ranked table sorted by unserved or underserved population. |
 | `fcc_find_underserved` | Finds geographic areas with limited or no broadband coverage at a given speed threshold, ranked by underserved population. The core tool for BEAD program analysis and broadband equity research. |
-| `fcc_search_providers` | Searches for ISPs by holding company name, filtered by state and technology type. Returns a deduplicated list with `hoconum` identifiers for follow-up calls. |
-| `fcc_get_provider` | Returns a national-level coverage profile for a specific holding company — states served, technologies deployed, and locations covered at each speed tier. |
+| `fcc_search_providers` | Searches for ISPs by holding company name, filtered by state and technology type. Returns a deduplicated list with `hoconum` identifiers for follow-up calls, each carrying that company's complete national states and technologies, and reports when the live path returned a sample of the matching companies rather than every one. |
+| `fcc_get_provider` | Returns a national-level coverage profile for a specific holding company — technologies deployed and the population covered at each download speed tier. |
 | `fcc_list_filing_periods` | Returns available data vintages: Form 477 filing periods (Jun 2015–Jun 2021) and BDC as-of dates (Jun 2022 onward, requires credentials). |
 | `fcc_list_downloads` | Lists downloadable BDC data files for a specific as-of date — availability by state and provider, mobile coverage, and challenge data. Requires BDC API credentials. |
 
@@ -139,10 +139,10 @@ List BDC bulk data files available for download for a specific filing period.
 | Type | Name | Description |
 |:---|:---|:---|
 | Resource | `fcc-broadband://geography/{type}/{id}/summary` | Broadband coverage summary for a specific geography: provider counts by speed tier, urban/rural split, tribal breakdown. Addressable by type and GEOID. |
-| Resource | `fcc-broadband://providers/list` | List of all Form 477 holding company numbers (`hoconum` identifiers only). Use `fcc_search_providers` to resolve a name to its hoconum. |
+| Resource | `fcc-broadband://providers/list/{offset}` | One page of the Form 477 holding-company directory: 25 `hoconum` identifiers with company names, the directory total, and the offset of the next page. Start at `fcc-broadband://providers/list/0`. |
 | Prompt | `broadband_equity_analysis` | Structures a digital divide analysis comparing broadband access across demographic groups — guides chaining with Census and BLS data. Accepts `region` and `focus` (`underserved`, `rural`, `tribal`, `all`). |
 
-All resource data is also reachable via tools. The `providers/list` resource is derived from the deployment table via `$group` aggregation — use `fcc_search_providers` for filtered lookups.
+All resource data is also reachable via tools. The directory pages the provider summary table and resolves each name with a single-`hoconum` lookup — to find one company by name rather than paging, use `fcc_search_providers`.
 
 ## Features
 
