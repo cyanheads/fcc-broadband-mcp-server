@@ -1,6 +1,6 @@
 # fcc-broadband-mcp-server - Directory Structure
 
-Generated on: 2026-08-13 14:01:09
+Generated on: 2026-08-25 08:22:35
 
 ```text
 fcc-broadband-mcp-server/
@@ -196,7 +196,8 @@ fcc-broadband-mcp-server/
 │       ├── list-downloads.tool.test.ts
 │       ├── list-filing-periods.tool.test.ts
 │       ├── search-availability.tool.test.ts
-│       └── search-providers.tool.test.ts
+│       ├── search-providers.tool.test.ts
+│       └── strict-inputs.test.ts
 ├── .dockerignore
 ├── .env.example
 ├── .gitattributes

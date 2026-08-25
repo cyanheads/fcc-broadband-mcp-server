@@ -2,6 +2,10 @@
 
 All notable changes to this project. Each entry links to its full per-version file in [changelog/](changelog/).
 
+## [0.2.2](changelog/0.2.x/0.2.2.md) — 2026-08-25
+
+Adopts mcp-ts-core 0.12.3 across the framework's SDK v2 migration: protocol revision 2026-07-28 is served alongside the 2025 era, tool inputs reject an undeclared argument key by name, and cache hints declare what a client may reuse.
+
 ## [0.2.1](changelog/0.2.x/0.2.1.md) — 2026-08-13
 
 Broadband and technology lookups now resolve against the correct census vintage and the complete Form 477 taxonomy, nonexistent geographies are rejected instead of read as zero coverage, and BDC downloads validate as-of dates up front and page instead of returning every file at once.

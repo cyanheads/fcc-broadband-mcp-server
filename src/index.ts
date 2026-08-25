@@ -22,6 +22,22 @@ await createApp({
   resources: [...allResourceDefinitions],
   prompts: [...allPromptDefinitions],
   landing: { requireAuth: false },
+  /*
+   * Cache hints for protocol revision 2026-07-28. The definition arrays are
+   * static and nothing mutates them at runtime, and no definition declares an
+   * auth scope, so every caller is served the same listing — hence `public`.
+   * Both resources read Form 477, a closed dataset final as of the June 2021
+   * filing period, so a read stays fresh far longer than a listing.
+   * 2025-era responses are unaffected.
+   */
+  cacheHints: {
+    'tools/list': { ttlMs: 3_600_000, cacheScope: 'public' },
+    'prompts/list': { ttlMs: 3_600_000, cacheScope: 'public' },
+    'resources/list': { ttlMs: 3_600_000, cacheScope: 'public' },
+    'resources/templates/list': { ttlMs: 3_600_000, cacheScope: 'public' },
+    'server/discover': { ttlMs: 3_600_000, cacheScope: 'public' },
+    'resources/read': { ttlMs: 86_400_000, cacheScope: 'public' },
+  },
   instructions:
     'FCC broadband data server providing access to Form 477 (2015–2021) and BDC (2022+) datasets.\n' +
     '- Start with fcc_geocode_block to convert coordinates to census block FIPS for address-level queries\n' +

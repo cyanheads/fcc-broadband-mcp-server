@@ -1,6 +1,6 @@
 {
   "name": "fcc-broadband-mcp-server",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Access FCC broadband availability, coverage analysis, and digital divide data for US geographies and census blocks via MCP. STDIO or Streamable HTTP.",
   "author": {
     "name": "cyanheads"
