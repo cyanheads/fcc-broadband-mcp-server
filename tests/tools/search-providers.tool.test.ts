@@ -264,6 +264,17 @@ describe('searchProvidersTool', () => {
     expect(entry?.recovery).toContain('FCC_MIRROR_ENABLED');
     // Narrowing the input does not decide whether the query completes (issue #18).
     expect(entry?.recovery).not.toContain('state filter');
+    // OpenDataService raises it, not the handler — the marker is what keeps the
+    // unthrown-reason lint from reading the entry as dead.
+    expect(entry?.thrownBy).toBe('service');
+  });
+
+  it('advertises no failure for a search that matches nothing', () => {
+    // An empty match is a successful empty result carrying a notice. A declared
+    // not-found reason would tell a client to plan for a failure no caller can
+    // observe.
+    const codes = (searchProvidersTool.errors ?? []).map((e) => e.code);
+    expect(codes).not.toContain(JsonRpcErrorCode.NotFound);
   });
 
   it('formats empty provider list with fallback text', () => {

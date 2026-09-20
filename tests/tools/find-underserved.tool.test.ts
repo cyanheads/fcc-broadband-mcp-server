@@ -262,6 +262,14 @@ describe('findUnderservedTool', () => {
     expect(mockGetAreaStatsByType).not.toHaveBeenCalled();
   });
 
+  it('advertises no failure for filters that match no area', () => {
+    // An empty match is a successful empty ranking carrying a notice. A declared
+    // not-found reason would tell a client to plan for a failure no caller can
+    // observe.
+    const codes = (findUnderservedTool.errors ?? []).map((e) => e.code);
+    expect(codes).not.toContain(JsonRpcErrorCode.NotFound);
+  });
+
   it('carries a recovery hint naming both fixes for an unrecognized state code', async () => {
     const ctx = createMockContext({ errors: findUnderservedTool.errors });
     const input = findUnderservedTool.input.parse({ geography_type: 'county', state: 'ZZ' });

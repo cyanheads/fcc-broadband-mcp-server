@@ -175,6 +175,7 @@ export const listDownloadsTool = tool('fcc_list_downloads', {
     {
       reason: 'credentials_required',
       code: JsonRpcErrorCode.Unauthorized,
+      thrownBy: 'service',
       when: 'FCC_BDC_USERNAME or FCC_BDC_HASH_VALUE environment variables are not set.',
       recovery:
         'Set FCC_BDC_USERNAME and FCC_BDC_HASH_VALUE from the broadbandmap.fcc.gov "Manage API Access" page.',
@@ -182,6 +183,7 @@ export const listDownloadsTool = tool('fcc_list_downloads', {
     {
       reason: 'invalid_as_of_date',
       code: JsonRpcErrorCode.ValidationError,
+      thrownBy: 'service',
       when: 'The as_of_date is not a date on the calendar, falls before the first BDC filing period, or is not among the as-of dates the BDC API publishes. The first two are caught without credentials; the third needs them, since only the credentialed endpoint knows the published set.',
       recovery:
         'Read the thrown recovery hint — it says which of the three the date was — then call fcc_list_filing_periods with include_bdc=true for the published BDC as-of dates.',

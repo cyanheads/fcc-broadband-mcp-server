@@ -234,6 +234,14 @@ export class OpenDataService {
     }
   }
 
+  /**
+   * Releases the local mirror's SQLite handles. A no-op when the mirror is
+   * disabled, and safe on a store that was never opened.
+   */
+  async close(): Promise<void> {
+    await this._mirror?.close();
+  }
+
   private buildUrl(datasetId: string, params: SoqlParams): string {
     const url = new URL(`${BASE_URL}/${datasetId}.json`);
     for (const [key, value] of Object.entries(params)) {
@@ -1030,4 +1038,13 @@ export function getOpenDataService(): OpenDataService {
     throw new Error('OpenDataService not initialized — call initOpenDataService() in setup()');
   }
   return _service;
+}
+
+/**
+ * Counterpart to {@link initOpenDataService}, for `createApp({ teardown })`.
+ * Shutdown can run on a path where `setup()` never completed, so an
+ * uninitialized service is not an error here.
+ */
+export async function closeOpenDataService(): Promise<void> {
+  await _service?.close();
 }

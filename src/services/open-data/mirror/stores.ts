@@ -6,9 +6,10 @@
  * one). Also owns the row ceilings the specs declare and the read facade
  * imports, and the `mirror_coverage` bookkeeping table (which state-scoped
  * ingest units have fully drained, plus the full-corpus marker), which lives in
- * the deployment database and is created via idempotent DDL on the raw handle
- * (framework migrations do not run on fresh databases, so aux DDL cannot ride
- * them).
+ * the deployment database and is created via idempotent DDL on the raw handle —
+ * no store declares `migrations`, and the DDL runs on whichever handle a write
+ * or read reaches first, so it stays independent of the framework's migration
+ * pass.
  * @module services/open-data/mirror/stores
  */
 

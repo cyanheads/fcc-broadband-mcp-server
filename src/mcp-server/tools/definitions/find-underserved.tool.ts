@@ -244,14 +244,11 @@ export const findUnderservedTool = tool('fcc_find_underserved', {
     },
   },
 
+  /*
+   * A filter set matching no area is a successful empty ranking carrying a
+   * notice, not a failure, so no not-found reason is declared.
+   */
   errors: [
-    {
-      reason: 'no_areas_found',
-      code: JsonRpcErrorCode.NotFound,
-      when: 'No areas found matching the criteria after applying filters.',
-      recovery:
-        'Lower min_unserved_pop, change urban_rural_filter to "all", or remove the state filter to search nationwide.',
-    },
     {
       reason: 'unknown_state',
       code: JsonRpcErrorCode.ValidationError,

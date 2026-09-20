@@ -169,18 +169,16 @@ export const searchProvidersTool = tool('fcc_search_providers', {
     },
   },
 
+  /*
+   * A search matching nothing is a successful empty result carrying a notice,
+   * not a failure, so no not-found reason is declared.
+   */
   errors: [
-    {
-      reason: 'no_providers_found',
-      code: JsonRpcErrorCode.NotFound,
-      when: 'No providers matched the search criteria.',
-      recovery:
-        'Try a shorter name fragment, remove state or technology filters, or verify state abbreviation is uppercase (e.g., "WA").',
-    },
     {
       reason: 'live_search_timeout',
       code: JsonRpcErrorCode.Timeout,
       retryable: false,
+      thrownBy: 'service',
       when: 'A live FCC Open Data provider search exceeded its 30-second budget, on either the bounded windowed read or one of the per-provider footprint lookups; both are shapes that answer in seconds or not at all, so a retry reaches the same result.',
       recovery:
         'FCC Open Data is not serving this search right now; try again later. Operators can enable the local Form 477 mirror (FCC_MIRROR_ENABLED=true) to search holding-company names locally.',

@@ -66,6 +66,7 @@ export const getProviderTool = tool('fcc_get_provider', {
       reason: 'live_provider_timeout',
       code: JsonRpcErrorCode.Timeout,
       retryable: false,
+      thrownBy: 'service',
       when: 'A live FCC Open Data lookup exceeded its 30-second budget; the queries are point lookups, so a retry reaches the same result.',
       recovery:
         'FCC Open Data is not serving this lookup right now; try again later. Operators can enable the local Form 477 mirror (FCC_MIRROR_ENABLED=true) to serve provider profiles locally.',

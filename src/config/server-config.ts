@@ -32,13 +32,10 @@ const ServerConfigSchema = z.object({
     .describe(
       'Serve Form 477 queries from a local SQLite mirror when its coverage allows (bootstrap with `bun run mirror:init`). Default: false.',
     ),
-  // Empty or whitespace-only values (an unfilled `${FCC_MIRROR_PATH}` placeholder
-  // from a bundle/compose template) are treated as absent so startup never crashes.
   mirrorPath: z
-    .preprocess(
-      (v) => (typeof v === 'string' && v.trim() === '' ? undefined : v),
-      z.string().min(1).default('data/fcc-mirror'),
-    )
+    .string()
+    .min(1)
+    .default('data/fcc-mirror')
     .describe('Directory holding the mirror SQLite files. Default: data/fcc-mirror.'),
 });
 

@@ -13,7 +13,10 @@ import { allResourceDefinitions } from './mcp-server/resources/definitions/index
 import { allToolDefinitions } from './mcp-server/tools/definitions/index.js';
 import { initBdcApiService } from './services/bdc-api/bdc-api-service.js';
 import { initGeoApiService } from './services/geo-api/geo-api-service.js';
-import { initOpenDataService } from './services/open-data/open-data-service.js';
+import {
+  closeOpenDataService,
+  initOpenDataService,
+} from './services/open-data/open-data-service.js';
 
 await createApp({
   name: 'fcc-broadband-mcp-server',
@@ -22,6 +25,13 @@ await createApp({
   resources: [...allResourceDefinitions],
   prompts: [...allPromptDefinitions],
   landing: { requireAuth: false },
+  /*
+   * No tool or resource handler calls `ctx.requestInput`, so nothing here needs
+   * a session to answer a mid-handler prompt. Declared in source rather than
+   * left to a deployment's `MCP_SESSION_MODE`, which still wins when it carries
+   * a meaningful value.
+   */
+  sessionMode: 'stateless',
   /*
    * Cache hints for protocol revision 2026-07-28. The definition arrays are
    * static and nothing mutates them at runtime, and no definition declares an
@@ -51,4 +61,10 @@ await createApp({
     initOpenDataService(core.config, core.storage, serverConfig);
     initBdcApiService(core.config, core.storage, serverConfig);
   },
+  /*
+   * The Form 477 mirror is the only service holding an OS resource — one SQLite
+   * file handle per store, opened lazily on the first mirrored read. The geo and
+   * BDC services hold nothing beyond `fetch` calls bound to a request's signal.
+   */
+  teardown: closeOpenDataService,
 });
