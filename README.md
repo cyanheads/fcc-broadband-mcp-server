@@ -7,7 +7,7 @@
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/Version-0.2.2-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/users/cyanheads/packages/container/package/fcc-broadband-mcp-server) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-^2.0.0-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![npm](https://img.shields.io/npm/v/@cyanheads/fcc-broadband-mcp-server?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@cyanheads/fcc-broadband-mcp-server) [![TypeScript](https://img.shields.io/badge/TypeScript-^7.0.2-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.3.0-blueviolet.svg?style=flat-square)](https://bun.sh/)
+[![Version](https://img.shields.io/badge/Version-0.2.2-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/users/cyanheads/packages/container/package/fcc-broadband-mcp-server) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-^2.0.0-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![npm](https://img.shields.io/npm/v/@cyanheads/fcc-broadband-mcp-server?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@cyanheads/fcc-broadband-mcp-server) [![TypeScript](https://img.shields.io/badge/TypeScript-^7.0.2-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.4.0-blueviolet.svg?style=flat-square)](https://bun.sh/)
 
 </div>
 
@@ -27,142 +27,162 @@
 
 ---
 
-## Tools
+## Overview
 
-9 tools for working with FCC broadband data — block-level availability, geography-level coverage analysis, provider search, and BDC bulk download manifests:
+FCC broadband availability, coverage analysis, and digital divide data across Form 477 (2015–2021) and BDC (2022–present) filings. Geocode coordinates to census blocks, look up ISP availability and speeds, and rank geographies by unserved population for BEAD program and equity research. Runs as a stdio process, a local Streamable HTTP server, or the public hosted endpoint above.
+
+### Tools
 
 | Tool | Description |
 |:---|:---|
-| `fcc_geocode_block` | Converts a latitude/longitude coordinate to a 2010-vintage census block FIPS code (15-digit), county FIPS, county name, state FIPS, state code, and state name. Required prerequisite for `fcc_search_availability`. |
-| `fcc_search_availability` | Queries broadband providers and advertised speeds at a census block, filtered by technology type and speed threshold. The starting point for any address-level broadband lookup. |
-| `fcc_get_coverage_summary` | Returns a broadband coverage summary for a geography — population with zero, one, two, or three-plus providers at a given speed threshold, split by urban/rural and tribal/non-tribal. |
-| `fcc_compare_areas` | Compares broadband coverage metrics across multiple geographies of the same type and returns a ranked table sorted by unserved or underserved population. |
-| `fcc_find_underserved` | Finds geographic areas with limited or no broadband coverage at a given speed threshold, ranked by underserved population. The core tool for BEAD program analysis and broadband equity research. |
-| `fcc_search_providers` | Searches for ISPs by holding company name, filtered by state and technology type. Returns a deduplicated list with `hoconum` identifiers for follow-up calls, each carrying that company's complete national states and technologies, and reports when the live path returned a sample of the matching companies rather than every one. |
-| `fcc_get_provider` | Returns a national-level coverage profile for a specific holding company — technologies deployed and the population covered at each download speed tier. |
-| `fcc_list_filing_periods` | Returns available data vintages: Form 477 filing periods (Jun 2015–Jun 2021) and BDC as-of dates (Jun 2022 onward, requires credentials). |
-| `fcc_list_downloads` | Lists downloadable BDC data files for a specific as-of date — availability by state and provider, mobile coverage, and challenge data. Requires BDC API credentials. |
+| `fcc_geocode_block` | Converts a lat/lon coordinate to a 2010-vintage census block FIPS code, plus county and state identifiers. Required prerequisite for `fcc_search_availability`. |
+| `fcc_search_availability` | Queries broadband providers and advertised speeds at a census block, filtered by technology and speed. |
+| `fcc_get_coverage_summary` | Broadband coverage summary for a geography — population by provider count, split by urban/rural and tribal/non-tribal. |
+| `fcc_compare_areas` | Ranks broadband coverage across multiple geographies of the same type, worst-first. |
+| `fcc_find_underserved` | Finds the most broadband-underserved areas within a state or nationwide, ranked by unserved population. |
+| `fcc_search_providers` | Searches ISPs by holding company name, state, and technology; returns `hoconum` identifiers for follow-up calls. |
+| `fcc_get_provider` | National coverage profile for a holding company — technologies deployed and population covered per speed tier. |
+| `fcc_list_filing_periods` | Lists available data vintages: Form 477 filing periods and BDC as-of dates. |
+| `fcc_list_downloads` | Lists downloadable BDC bulk data files for a specific as-of date. Requires BDC credentials. |
 
-### `fcc_geocode_block`
+### Resources
 
-Convert geographic coordinates to a census block FIPS code for broadband availability lookups.
+| Resource | Description |
+|:---|:---|
+| `fcc-broadband://geography/{type}/{id}/summary` | Broadband coverage summary for a geography: provider counts by speed tier, urban/rural split, tribal breakdown. |
+| `fcc-broadband://providers/list/{offset}` | One page of the Form 477 holding-company directory, 25 entries per page. |
+
+All resource data is also reachable via tools — the directory pages the provider summary table and resolves each name with a single-`hoconum` lookup; to find one company by name rather than paging, use `fcc_search_providers`.
+
+### Prompts
+
+| Prompt | Description |
+|:---|:---|
+| `broadband_equity_analysis` | Structures a digital divide analysis comparing broadband access across demographic groups, chaining Census and BLS data. |
+
+## Capability reference
+
+### `fcc_geocode_block` <sub>tool</sub>
 
 - Calls the FCC Geo API — no auth required, no rate limit documented
-- Returns 15-digit block FIPS, its census vintage, 5-digit county FIPS, county name, state FIPS, 2-letter state code, and state name
-- Resolves against 2010 census boundaries — the vintage the Form 477 deployment dataset is keyed by, so the block feeds `fcc_search_availability` directly
+- Returns a 15-digit block FIPS code, its census vintage, 5-digit county FIPS, county name, state FIPS, 2-letter state code, and state name
+- Resolves against 2010 census boundaries — the vintage the Form 477 deployment dataset is keyed by, so `blockFips` feeds `fcc_search_availability` directly
 - Required first step before `fcc_search_availability` — the broadband deployment dataset is indexed by census block, not address
+- Typed error: `block_not_found` when no census block matches the coordinates (over water or outside US coverage)
 
 ---
 
-### `fcc_search_availability`
-
-Query which ISPs serve a specific census block and what speeds they advertise.
+### `fcc_search_availability` <sub>tool</sub>
 
 - Requires a 15-digit census block FIPS on 2010 boundaries; use `fcc_geocode_block` to convert coordinates first
-- Filter by any Form 477 technology code — 0 (all other), 10/11/12 (asymmetric xDSL, ADSL2, VDSL), 20 (symmetric xDSL), 30 (other copper wireline), 40–43 (cable modem, unqualified through DOCSIS 3.1), 50 (fiber to the end user), 60 (satellite), 70 (terrestrial fixed wireless), 90 (electric power line)
-- Filter by minimum advertised download speed in Mbps
-- Filter to consumer-only or business-only service
-- Returns per-provider records with `hoconum`, `techcode`, `maxaddown`, `maxadup`, `consumer`, `business`
-- Coverage is Form 477 data through June 2021 — reflects ISP-reported availability at census block granularity (not address-level)
+- Filter by any Form 477 technology code (0, 10–12, 20, 30, 40–43, 50, 60, 70, 90), minimum advertised download speed in Mbps, and consumer-only/business-only service
+- Returns per-provider records with `hoconum`, `techCode`/`techLabel`, `maxDownloadMbps`, `maxUploadMbps`, `consumer`, `business`
+- Coverage is Form 477 data through June 2021 — ISP-reported availability at census block granularity, which can overstate coverage for some addresses
+- Typed error: `block_not_found` when the block has no reported providers and no filters were applied
 
 ---
 
-### `fcc_get_coverage_summary`
-
-Analyze broadband access across any US geography at a given speed threshold.
+### `fcc_get_coverage_summary` <sub>tool</sub>
 
 - Supports seven geography types: `nation`, `state`, `county`, `cd` (congressional district), `place` (census-designated place), `cbsa` (metro area), `tribal`
 - Technology filter: any wired/fixed wireless (`acfosw`), fiber only (`f`), cable (`c`), DSL (`a`), satellite (`s`), fixed wireless (`w`), or combinations
 - Speed thresholds: 0.2, 4, 10, 25 (FCC legacy broadband definition), 100 (BEAD standard), 250, 1000 Mbps
-- Returns population breakdowns: zero providers (unserved), one (no competition), two, three-plus; coverage %, unserved %, competitive %
-- Per-segment breakdown by urban/rural and tribal/non-tribal for equity analysis
+- Returns population breakdowns — zero providers (unserved), one (no competition), two, three-plus — plus coverage/unserved/competitive percentages, with a per-segment urban/rural × tribal/non-tribal split
+- Typed errors: `geography_not_found`, `invalid_geography_combo` (`geography_id` required for non-nation types, must be omitted for nation), `invalid_geography_id_shape` (digit count must match the type: state=2, county=5, cd=4, cbsa=5, place=7)
 
 ---
 
-### `fcc_compare_areas`
-
-Rank geographies by broadband access metrics to identify where underservice is worst.
+### `fcc_compare_areas` <sub>tool</sub>
 
 - Compare up to 50 geographies of the same type, or all 50 states + DC via `compare_all_states: true`
 - Sort by unserved population share, raw unserved headcount (useful for BEAD funding allocation), coverage rate, or competitive share
-- Every sort ranks worst-first — rank 1 is the area most in need, whichever metric you pick
-- Returns a ranked table with per-geography population and coverage metrics
-- Each row includes the resolved geography name alongside its GEOID when available
+- Every sort ranks worst-first — rank 1 is the area most in need, whichever metric is chosen
+- Returns a ranked table with per-geography population and coverage metrics; each row includes the resolved geography name alongside its GEOID when available
+- Typed errors: `no_data_found`, `invalid_all_states_combo`, `missing_geography_ids` (fewer than 2 provided), `invalid_geography_id_shape`
 
 ---
 
-### `fcc_find_underserved`
+### `fcc_find_underserved` <sub>tool</sub>
 
-Find the most broadband-underserved areas within a state or nationwide.
-
-- Scope to a specific state or territory, or run nationwide (returns top areas only)
-- Geography granularity: county, congressional district, census place, or CBSA
-- Default filter: rural areas only — where underservice is most concentrated
-- `min_unserved_pop` defaults to 1, so fully covered areas stay out of the ranking; set it to 0 to rank every area, or higher to drop small gaps
-- Results ranked by unserved population, highest first
-- Each row includes the resolved geography name alongside its GEOID when available
+- Scope to a specific state or territory (2-letter USPS code), or run nationwide (returns top areas only)
+- Geography granularity: county, congressional district, census place, or CBSA; defaults to rural areas only, where underservice is most concentrated
+- `min_unserved_pop` defaults to 1, so fully covered areas stay out of the ranking; set to 0 to rank every area or higher to drop small gaps
+- Results ranked by unserved population, highest first, up to `limit` (default 20, max 100); each row includes the resolved geography name alongside its GEOID when available
+- Typed errors: `unknown_state` (not a real USPS state or territory abbreviation); filters matching no area return an empty ranking with a notice, not an error
 
 ---
 
-### `fcc_search_providers`
+### `fcc_search_providers` <sub>tool</sub>
 
-Look up ISPs by name or state to get `hoconum` identifiers for follow-up queries.
-
-- Case-insensitive partial name match — e.g., `"Comcast"`, `"T-Mobile"`, `"Frontier"`
-- Filter by 2-letter state abbreviation or technology code
-- Returns deduplicated holding companies with `hoconum`, states served, and technology codes
+- Case-insensitive partial name match on holding company name; filter by 2-letter state abbreviation or Form 477 technology code
+- Returns deduplicated holding companies with `hoconum`, plus each company's complete national `statesServed` and `techCodes` — resolved per company, not narrowed by the state/tech filters
 - Geographic filtering is state-level; sub-state granularity requires cross-referencing block data via `fcc_search_availability`
 - Up to 200 results per call
+- When the live scan hits its row ceiling (`scanTruncated`), the returned providers are a sample and the true match count is unavailable — narrow the filters or enable the local Form 477 mirror (`FCC_MIRROR_ENABLED=true`) for a complete search
+- Typed errors: `live_search_timeout` (30-second budget, non-retryable); a search matching nothing returns an empty result with a notice, not an error
 
 ---
 
-### `fcc_list_filing_periods`
+### `fcc_get_provider` <sub>tool</sub>
 
-Discover valid data vintages before querying download manifests.
+- Input: `hoconum` (digits only) from `fcc_search_providers`
+- Returns national `techCodes`/`techLabels` and population covered per download speed tier; tiers with zero coverage are omitted
+- Population per tier counts each person once, regardless of how many technologies reach them
+- Business-only carriers with no reported residential coverage return empty `techCodes`/`speedTierPopulation` — use `fcc_search_availability` for their block-level deployments
+- Typed errors: `provider_not_found`, `live_provider_timeout` (30-second budget, non-retryable — enable the local Form 477 mirror to serve profiles locally)
+
+---
+
+### `fcc_list_filing_periods` <sub>tool</sub>
 
 - Form 477 periods (Jun 2015–Jun 2021) are hardcoded — always available, no credentials needed
-- BDC as-of dates (Jun 2022 onward) are fetched live from the authenticated API — requires `FCC_BDC_USERNAME` and `FCC_BDC_HASH_VALUE`
+- `include_bdc` defaults to false; set true to also fetch BDC as-of dates (Jun 2022 onward) from the authenticated API — requires `FCC_BDC_USERNAME` and `FCC_BDC_HASH_VALUE`
 - Call before `fcc_list_downloads` to determine valid `as_of_date` values
 
 ---
 
-### `fcc_list_downloads`
-
-List BDC bulk data files available for download for a specific filing period.
+### `fcc_list_downloads` <sub>tool</sub>
 
 - Requires BDC API credentials (`FCC_BDC_USERNAME`, `FCC_BDC_HASH_VALUE`)
 - Filter by data type (availability or challenge), file category, technology type, state, or provider name
-- Returns file metadata — provider, state, technology, record count — plus download URLs
-- Returns file manifests, not file contents; BDC CSVs are large zipped files not suitable for inline API response
-- Paged with `limit` (default 50, max 200) and `offset` — `totalFiles` counts every file matching the filters, and each response reports its offset, its file count, and a `nextOffset` to pass back, omitted on the last page
-- An `as_of_date` that is not a calendar date, or that falls before the first BDC period (2022-06-30), is rejected without credentials; a well-formed date BDC does not publish is rejected once credentials allow the published set to be read
+- Returns file manifests, not file contents — file metadata (provider, state, technology, record count) plus download URLs; BDC CSVs are large zipped files not suitable for inline API response
+- Paged with `limit` (default 50, max 200) and `offset` — `totalFiles` counts every file matching the filters, and each response reports its offset, file count, and a `nextOffset`, omitted on the last page
+- Typed error `invalid_as_of_date`: rejected without credentials when not a calendar date or before the first BDC period (2022-06-30); rejected with credentials when the date isn't among the published set
+- Typed error `credentials_required` when BDC credentials are absent
 
-## Resources and prompts
+---
 
-| Type | Name | Description |
-|:---|:---|:---|
-| Resource | `fcc-broadband://geography/{type}/{id}/summary` | Broadband coverage summary for a specific geography: provider counts by speed tier, urban/rural split, tribal breakdown. Addressable by type and GEOID. |
-| Resource | `fcc-broadband://providers/list/{offset}` | One page of the Form 477 holding-company directory: 25 `hoconum` identifiers with company names, the directory total, and the offset of the next page. Start at `fcc-broadband://providers/list/0`. |
-| Prompt | `broadband_equity_analysis` | Structures a digital divide analysis comparing broadband access across demographic groups — guides chaining with Census and BLS data. Accepts `region` and `focus` (`underserved`, `rural`, `tribal`, `all`). |
+### `fcc-broadband://geography/{type}/{id}/summary` <sub>resource</sub>
 
-All resource data is also reachable via tools. The directory pages the provider summary table and resolves each name with a single-`hoconum` lookup — to find one company by name rather than paging, use `fcc_search_providers`.
+- Addressable by geography type (`nation`, `state`, `county`, `cd`, `place`, `cbsa`, `tribal`) and FIPS GEOID; GEOID digit count is validated per type
+- Fixed to a 25 Mbps threshold and `acfosw` (any wired/fixed wireless) technology filter — use `fcc_get_coverage_summary` for other thresholds or filters
+- Returns population by provider tier, coverage/unserved/competitive percentages, and a per-segment urban/rural × tribal/non-tribal breakdown
+
+---
+
+### `fcc-broadband://providers/list/{offset}` <sub>resource</sub>
+
+- Pages the Form 477 holding-company directory 25 entries at a time, ordered by `hoconum` ascending; start at offset `0` and follow each response's `nextOffset`
+- Each entry resolves `hoconum` to a company name when the FCC deployment table carries a matching row; unresolved entries omit `holdingCompanyName`
+- To find one company by name rather than browsing, use `fcc_search_providers` instead
+
+---
+
+### `broadband_equity_analysis` <sub>prompt</sub>
+
+- Arguments: `region` (free text) required; `focus` (`underserved`, `rural`, `tribal`, `all`) required
+- Returns one user message structuring a five-step analysis — baseline coverage, focus-specific deep dive, demographic cross-reference (Census/BLS/CDC), provider landscape, and BEAD eligibility
 
 ## Features
 
-Built on [`@cyanheads/mcp-ts-core`](https://www.npmjs.com/package/@cyanheads/mcp-ts-core):
+Built on [`@cyanheads/mcp-ts-core`](https://github.com/cyanheads/mcp-ts-core): stdio and Streamable HTTP transports, pluggable auth (`none` / `jwt` / `oauth`), swappable storage (`in-memory`, `filesystem`, `Supabase`, `Cloudflare KV/R2/D1`), structured logging with optional OpenTelemetry tracing.
 
-- Declarative tool, resource, and prompt definitions — single file per primitive, framework handles registration and validation
-- Unified error handling — handlers throw, framework catches, classifies, and formats
-- Pluggable auth: `none`, `jwt`, `oauth`
-- Swappable storage backends: `in-memory`, `filesystem`, `Supabase`, `Cloudflare KV/R2/D1`
-- Structured logging with optional OpenTelemetry tracing
-- STDIO and Streamable HTTP transports
-
-FCC broadband-specific:
+FCC-specific:
 
 - Wraps three FCC data sources: Form 477 public data via Socrata (no auth, 2015–2021), BDC Public Data API (authenticated, Jun 2022 onward), and FCC Geo API (no auth)
 - Auth-optional design — BDC tools return a structured `credentials_required` error with setup instructions when credentials are absent; all Form 477 and geocoding tools always work without credentials
 - Area Table aggregation for equity analysis — uses the pre-aggregated geography table (`xvwq-qtaj`) instead of querying the 50M-row deployment table, enabling fast coverage analysis at county and state scale
+- Optional local Form 477 mirror (`FCC_MIRROR_ENABLED=true`) serves block/geography lookups from an embedded SQLite index once bootstrapped, with live-API fallback for anything not yet ingested
 - All data is US federal government public domain (17 USC §105) — safe to distribute and cache
 
 Agent-friendly output:
@@ -235,7 +255,7 @@ MCP_TRANSPORT_TYPE=http MCP_HTTP_PORT=3010 bun run start:http
 
 ### Prerequisites
 
-- [Bun v1.3.0](https://bun.sh/) or higher (or Node.js v24+).
+- [Bun v1.4.0](https://bun.sh/) or higher (or Node.js v24+).
 - Optional: FCC BDC credentials for `fcc_list_downloads` and BDC filing periods. Generate a token at [broadbandmap.fcc.gov](https://broadbandmap.fcc.gov) under "Manage API Access" — no OAuth, manual token generation only.
 - Optional: Socrata app token (`FCC_OPENDATA_APP_TOKEN`) for higher rate limits on Form 477 queries.
 
@@ -380,7 +400,7 @@ See [`CLAUDE.md`](./CLAUDE.md) for development guidelines and architectural rule
 
 ## Contributing
 
-Issues and pull requests are welcome. Run checks and tests before submitting:
+Issues are welcome. Run checks and tests before submitting:
 
 ```sh
 bun run devcheck
