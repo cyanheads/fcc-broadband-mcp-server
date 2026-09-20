@@ -1,20 +1,63 @@
 {
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "fcc-broadband-mcp-server",
   "version": "0.2.2",
   "description": "Access FCC broadband availability, coverage analysis, and digital divide data for US geographies and census blocks via MCP. STDIO or Streamable HTTP.",
   "author": {
-    "name": "cyanheads"
+    "name": "cyanheads",
+    "email": "casey@caseyjhand.com",
+    "url": "https://caseyjhand.com"
   },
   "homepage": "https://github.com/cyanheads/fcc-broadband-mcp-server#readme",
   "repository": "https://github.com/cyanheads/fcc-broadband-mcp-server",
   "license": "Apache-2.0",
+  "keywords": ["mcp", "mcp-server", "model-context-protocol", "fcc", "broadband", "digital-divide"],
   "mcpServers": {
     "fcc-broadband-mcp-server": {
       "command": "npx",
       "args": ["-y", "@cyanheads/fcc-broadband-mcp-server"],
       "env": {
-        "MCP_TRANSPORT_TYPE": "stdio"
+        "MCP_TRANSPORT_TYPE": "stdio",
+        "FCC_BDC_USERNAME": "${user_config.FCC_BDC_USERNAME}",
+        "FCC_BDC_HASH_VALUE": "${user_config.FCC_BDC_HASH_VALUE}",
+        "FCC_OPENDATA_APP_TOKEN": "${user_config.FCC_OPENDATA_APP_TOKEN}",
+        "FCC_MIRROR_ENABLED": "${user_config.FCC_MIRROR_ENABLED}",
+        "FCC_MIRROR_PATH": "${user_config.FCC_MIRROR_PATH}"
       }
+    }
+  },
+  "userConfig": {
+    "FCC_BDC_USERNAME": {
+      "type": "string",
+      "title": "FCC BDC Username",
+      "description": "FCC account email for BDC API. Required for fcc_list_downloads and BDC filing periods.",
+      "default": ""
+    },
+    "FCC_BDC_HASH_VALUE": {
+      "type": "string",
+      "title": "FCC BDC API Token Hash",
+      "description": "API token hash from broadbandmap.fcc.gov Manage API Access page.",
+      "sensitive": true,
+      "default": ""
+    },
+    "FCC_OPENDATA_APP_TOKEN": {
+      "type": "string",
+      "title": "FCC Open Data App Token",
+      "description": "Socrata app token for FCC Open Data. Increases rate limits; not required.",
+      "sensitive": true,
+      "default": ""
+    },
+    "FCC_MIRROR_ENABLED": {
+      "type": "string",
+      "title": "Form 477 Mirror Enabled",
+      "description": "Serve Form 477 queries from a local SQLite mirror when its coverage allows (bootstrap with `bun run mirror:init`). Default: false.",
+      "default": ""
+    },
+    "FCC_MIRROR_PATH": {
+      "type": "string",
+      "title": "Form 477 Mirror Directory",
+      "description": "Directory holding the Form 477 mirror SQLite files. Default: data/fcc-mirror.",
+      "default": ""
     }
   }
 }

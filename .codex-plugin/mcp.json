@@ -4,6 +4,13 @@
     "args": ["-y", "@cyanheads/fcc-broadband-mcp-server"],
     "env": {
       "MCP_TRANSPORT_TYPE": "stdio"
-    }
+    },
+    "env_vars": [
+      "FCC_BDC_USERNAME",
+      "FCC_BDC_HASH_VALUE",
+      "FCC_OPENDATA_APP_TOKEN",
+      "FCC_MIRROR_ENABLED",
+      "FCC_MIRROR_PATH"
+    ]
   }
 }
