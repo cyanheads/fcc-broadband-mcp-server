@@ -2,6 +2,10 @@
 
 All notable changes to this project. Each entry links to its full per-version file in [changelog/](changelog/).
 
+## [0.2.3](changelog/0.2.x/0.2.3.md) — 2026-09-20 · ⚠️ Breaking
+
+Adopts mcp-ts-core 0.12.3 → 0.13.6: an unrecognized argument key is dropped or alias-rewritten before an undeclared one is rejected as InvalidParams (was ValidationError), upstream error data no longer carries the request URL by default, and a blank or unsubstituted bundle credential now reads as absent instead of a literal placeholder string.
+
 ## [0.2.2](changelog/0.2.x/0.2.2.md) — 2026-08-25
 
 Adopts mcp-ts-core 0.12.3 across the framework's SDK v2 migration: protocol revision 2026-07-28 is served alongside the 2025 era, tool inputs reject an undeclared argument key by name, and cache hints declare what a client may reuse.

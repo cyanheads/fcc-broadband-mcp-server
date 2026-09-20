@@ -1,6 +1,6 @@
 # fcc-broadband-mcp-server - Directory Structure
 
-Generated on: 2026-08-25 08:22:35
+Generated on: 2026-09-20 18:52:21
 
 ```text
 fcc-broadband-mcp-server/
@@ -14,6 +14,8 @@ fcc-broadband-mcp-server/
 │   │   ├── bug_report.yml
 │   │   ├── config.yml
 │   │   └── feature_request.yml
+│   ├── workflows/
+│   │   └── codeql.yml
 │   ├── CODE_OF_CONDUCT.md
 │   ├── CONTRIBUTING.md
 │   ├── FUNDING.yml
@@ -28,25 +30,7 @@ fcc-broadband-mcp-server/
 ├── docs/
 │   ├── design.md
 │   └── idea.md
-├── scripts/
-│   ├── build-changelog.ts
-│   ├── build.ts
-│   ├── check-dependency-specifiers.ts
-│   ├── check-docs-sync.ts
-│   ├── check-framework-antipatterns.ts
-│   ├── check-skill-versions.ts
-│   ├── check-skills-sync.ts
-│   ├── clean-mcpb.ts
-│   ├── clean.ts
-│   ├── devcheck.ts
-│   ├── fcc-mirror-init.ts
-│   ├── fcc-mirror-verify.ts
-│   ├── lint-mcp.ts
-│   ├── lint-packaging.ts
-│   ├── list-skills.ts
-│   ├── release-github.ts
-│   └── tree.ts
-├── skills/
+├── framework-skills/
 │   ├── add-app-tool/
 │   │   └── SKILL.md
 │   ├── add-prompt/
@@ -117,6 +101,8 @@ fcc-broadband-mcp-server/
 │   │   └── SKILL.md
 │   ├── release-and-publish/
 │   │   └── SKILL.md
+│   ├── release-pr-review/
+│   │   └── SKILL.md
 │   ├── report-issue-framework/
 │   │   └── SKILL.md
 │   ├── report-issue-local/
@@ -131,6 +117,24 @@ fcc-broadband-mcp-server/
 │   │   └── SKILL.md
 │   └── tool-defs-analysis/
 │       └── SKILL.md
+├── scripts/
+│   ├── build-changelog.ts
+│   ├── build.ts
+│   ├── check-dependency-specifiers.ts
+│   ├── check-docs-sync.ts
+│   ├── check-framework-antipatterns.ts
+│   ├── check-skill-versions.ts
+│   ├── check-skills-sync.ts
+│   ├── clean-mcpb.ts
+│   ├── clean.ts
+│   ├── devcheck.ts
+│   ├── fcc-mirror-init.ts
+│   ├── fcc-mirror-verify.ts
+│   ├── lint-mcp.ts
+│   ├── lint-packaging.ts
+│   ├── list-skills.ts
+│   ├── release-github.ts
+│   └── tree.ts
 ├── src/
 │   ├── config/
 │   │   └── server-config.ts
@@ -174,6 +178,8 @@ fcc-broadband-mcp-server/
 │   │       └── types.ts
 │   └── index.ts
 ├── tests/
+│   ├── config/
+│   │   └── server-config.test.ts
 │   ├── prompts/
 │   ├── resources/
 │   │   ├── geography-summary.resource.test.ts
@@ -183,16 +189,19 @@ fcc-broadband-mcp-server/
 │   │   │   └── bdc-api-service.test.ts
 │   │   ├── geo-api/
 │   │   │   └── geo-api-service.test.ts
-│   │   └── open-data/
-│   │       ├── form477-mirror.test.ts
-│   │       ├── mirror-helpers.test.ts
-│   │       └── open-data-service.test.ts
+│   │   ├── open-data/
+│   │   │   ├── form477-mirror.test.ts
+│   │   │   ├── mirror-helpers.test.ts
+│   │   │   ├── open-data-service-shutdown.test.ts
+│   │   │   └── open-data-service.test.ts
+│   │   └── upstream-error-redaction.test.ts
 │   └── tools/
 │       ├── compare-areas.tool.test.ts
 │       ├── find-underserved.tool.test.ts
 │       ├── geocode-block.tool.test.ts
 │       ├── get-coverage-summary.tool.test.ts
 │       ├── get-provider.tool.test.ts
+│       ├── input-pipeline.test.ts
 │       ├── list-downloads.tool.test.ts
 │       ├── list-filing-periods.tool.test.ts
 │       ├── search-availability.tool.test.ts
