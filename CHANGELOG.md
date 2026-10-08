@@ -2,6 +2,10 @@
 
 All notable changes to this project. Each entry links to its full per-version file in [changelog/](changelog/).
 
+## [0.2.4](changelog/0.2.x/0.2.4.md) — 2026-10-08
+
+Adopts mcp-ts-core 0.13.6 → 0.13.14: tool arguments sent as an integer for a string ID, a numeric or boolean string, a lone string for a list, or null for an optional field are repaired instead of rejected, and every tool error result carries its request ID.
+
 ## [0.2.3](changelog/0.2.x/0.2.3.md) — 2026-09-20 · ⚠️ Breaking
 
 Adopts mcp-ts-core 0.12.3 → 0.13.6: an unrecognized argument key is dropped or alias-rewritten before an undeclared one is rejected as InvalidParams (was ValidationError), upstream error data no longer carries the request URL by default, and a blank or unsubstituted bundle credential now reads as absent instead of a literal placeholder string.

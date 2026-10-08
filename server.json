@@ -6,7 +6,7 @@
     "url": "https://github.com/cyanheads/fcc-broadband-mcp-server",
     "source": "github"
   },
-  "version": "0.2.3",
+  "version": "0.2.4",
   "remotes": [
     {
       "type": "streamable-http",
@@ -19,7 +19,7 @@
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "@cyanheads/fcc-broadband-mcp-server",
       "runtimeHint": "npx",
-      "version": "0.2.3",
+      "version": "0.2.4",
       "environmentVariables": [
         {
           "name": "FCC_BDC_USERNAME",
@@ -70,7 +70,7 @@
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "@cyanheads/fcc-broadband-mcp-server",
       "runtimeHint": "npx",
-      "version": "0.2.3",
+      "version": "0.2.4",
       "environmentVariables": [
         {
           "name": "MCP_TRANSPORT_TYPE",

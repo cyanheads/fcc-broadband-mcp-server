@@ -1,6 +1,6 @@
 # fcc-broadband-mcp-server - Directory Structure
 
-Generated on: 2026-09-20 18:52:21
+Generated on: 2026-10-08 11:20:46
 
 ```text
 fcc-broadband-mcp-server/
@@ -130,9 +130,11 @@ fcc-broadband-mcp-server/
 │   ├── devcheck.ts
 │   ├── fcc-mirror-init.ts
 │   ├── fcc-mirror-verify.ts
+│   ├── install-otel.ts
 │   ├── lint-mcp.ts
 │   ├── lint-packaging.ts
 │   ├── list-skills.ts
+│   ├── prune-musl-packages.ts
 │   ├── release-github.ts
 │   └── tree.ts
 ├── src/
