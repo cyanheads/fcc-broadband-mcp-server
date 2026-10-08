@@ -3,7 +3,7 @@
  * @module tests/tools/find-underserved.tool.test
  */
 
-import { JsonRpcErrorCode, type McpError } from '@cyanheads/mcp-ts-core/errors';
+import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
 import { createMockContext, getEnrichment, runToolContract } from '@cyanheads/mcp-ts-core/testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { findUnderservedTool } from '@/mcp-server/tools/definitions/find-underserved.tool.js';
@@ -199,6 +199,28 @@ describe('findUnderservedTool', () => {
     expect(getEnrichment(ctx).notice).toBeDefined();
   });
 
+  it('points an empty state-scoped search at the nationwide fallback', async () => {
+    const ctx = createMockContext({ errors: findUnderservedTool.errors });
+    const input = findUnderservedTool.input.parse({
+      geography_type: 'county',
+      state: 'WY',
+      min_unserved_pop: 999999,
+    });
+    const result = await findUnderservedTool.handler(input, ctx);
+    expect(result.areas).toHaveLength(0);
+    expect(String(getEnrichment(ctx).notice)).toContain('Dropping state="WY" searches nationwide.');
+  });
+
+  it('omits the nationwide fallback when the empty search was already nationwide', async () => {
+    const ctx = createMockContext({ errors: findUnderservedTool.errors });
+    const input = findUnderservedTool.input.parse({
+      geography_type: 'county',
+      min_unserved_pop: 999999,
+    });
+    await findUnderservedTool.handler(input, ctx);
+    expect(String(getEnrichment(ctx).notice)).not.toContain('nationwide');
+  });
+
   describe('upstream row scan', () => {
     it('imposes no row budget of its own on the scan', async () => {
       const ctx = createMockContext({ errors: findUnderservedTool.errors });
@@ -271,14 +293,17 @@ describe('findUnderservedTool', () => {
   });
 
   it('carries a recovery hint naming both fixes for an unrecognized state code', async () => {
-    const ctx = createMockContext({ errors: findUnderservedTool.errors });
-    const input = findUnderservedTool.input.parse({ geography_type: 'county', state: 'ZZ' });
-    const error = await Promise.resolve(findUnderservedTool.handler(input, ctx)).catch(
-      (e: unknown) => e,
-    );
-    const hint = (error as McpError).data?.recovery as { hint: string } | undefined;
-    expect(hint?.hint).toMatch(/abbreviation/i);
-    expect(hint?.hint).toMatch(/omit/i);
+    // The framework fills the declared hint on the wire, so assert the envelope a caller receives.
+    const result = await runToolContract(findUnderservedTool, {
+      geography_type: 'county',
+      state: 'ZZ',
+    });
+    const { error: envelope } = (result.structuredContent ?? {}) as {
+      error?: { data?: { reason?: string; recovery?: { hint?: string } } };
+    };
+    expect(envelope?.data?.reason).toBe('unknown_state');
+    expect(envelope?.data?.recovery?.hint).toMatch(/abbreviation/i);
+    expect(envelope?.data?.recovery?.hint).toMatch(/omit/i);
   });
 
   it('does not set stateFipsPrefix when state is omitted', async () => {

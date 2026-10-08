@@ -72,7 +72,6 @@ export const geocodeBlockTool = tool('fcc_geocode_block', {
       throw ctx.fail(
         'block_not_found',
         'No census block found at the given coordinates — may be over water or outside US coverage.',
-        { ...ctx.recoveryFor('block_not_found') },
       );
     }
 

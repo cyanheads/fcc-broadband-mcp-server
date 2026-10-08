@@ -82,7 +82,6 @@ export const getProviderTool = tool('fcc_get_provider', {
       throw ctx.fail(
         'provider_not_found',
         `No provider found with hoconum "${input.hoconum}". Use fcc_search_providers to find valid hoconum values.`,
-        { ...ctx.recoveryFor('provider_not_found') },
       );
     }
 

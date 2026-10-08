@@ -107,7 +107,7 @@ export const findUnderservedTool = tool('fcc_find_underserved', {
       .enum(['acfosw', 'f', 'c', 'a', 'o', 's', 'w'])
       .default('acfosw')
       .describe(
-        'Technology filter. "acfosw" = any wired or fixed wireless. "f" = fiber only. "c" = cable only.',
+        'Technology filter, one value: "acfosw" = every technology (default). "f" = fiber, "c" = cable, "a" = ADSL/DSL, "o" = other (symmetric DSL, other copper, power line), "s" = satellite, "w" = fixed wireless.',
       ),
     min_unserved_pop: z
       .number()
@@ -273,7 +273,6 @@ export const findUnderservedTool = tool('fcc_find_underserved', {
       throw ctx.fail(
         'unknown_state',
         `"${input.state}" is not a USPS state or territory abbreviation.`,
-        { ...ctx.recoveryFor('unknown_state') },
       );
     }
     const service = getOpenDataService();
@@ -338,7 +337,9 @@ export const findUnderservedTool = tool('fcc_find_underserved', {
     }
     if (limited.length === 0) {
       notices.push(
-        `No areas found with the current filters. Try lowering min_unserved_pop or setting urban_rural_filter to "all".`,
+        `No areas found with the current filters. Try lowering min_unserved_pop or setting urban_rural_filter to "all".${
+          input.state !== undefined ? ` Dropping state="${input.state}" searches nationwide.` : ''
+        }`,
       );
     }
     const notice = notices.join(' ');

@@ -169,7 +169,6 @@ export const searchAvailabilityTool = tool('fcc_search_availability', {
       throw ctx.fail(
         'block_not_found',
         `No broadband providers found for census block ${input.block_fips}. The block may be non-residential or have no reported coverage.`,
-        { ...ctx.recoveryFor('block_not_found') },
       );
     }
 

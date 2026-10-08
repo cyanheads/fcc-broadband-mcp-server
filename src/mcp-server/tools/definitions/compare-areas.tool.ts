@@ -113,7 +113,7 @@ export const compareAreasTool = tool('fcc_compare_areas', {
       .enum(['acfosw', 'f', 'c', 'a', 'o', 's', 'w'])
       .default('acfosw')
       .describe(
-        'Technology filter. "acfosw" = any wired or fixed wireless. "f" = fiber only. "c" = cable only. "a" = DSL. "s" = satellite. "w" = fixed wireless.',
+        'Technology filter, one value: "acfosw" = every technology (default). "f" = fiber, "c" = cable, "a" = ADSL/DSL, "o" = other (symmetric DSL, other copper, power line), "s" = satellite, "w" = fixed wireless.',
       ),
     speed_down: z
       .enum(['0.2', '4', '10', '25', '100', '250', '1000'])
@@ -222,7 +222,6 @@ export const compareAreasTool = tool('fcc_compare_areas', {
       throw ctx.fail(
         'invalid_all_states_combo',
         'compare_all_states=true requires geography_type="state"',
-        { ...ctx.recoveryFor('invalid_all_states_combo') },
       );
     }
 
@@ -232,17 +231,12 @@ export const compareAreasTool = tool('fcc_compare_areas', {
       throw ctx.fail(
         'missing_geography_ids',
         'Provide at least 2 geography_ids to compare, or set compare_all_states=true.',
-        { ...ctx.recoveryFor('missing_geography_ids') },
       );
     }
 
     for (const id of geoIds) {
       const shapeError = geoidShapeError(input.geography_type, id);
-      if (shapeError) {
-        throw ctx.fail('invalid_geography_id_shape', shapeError, {
-          ...ctx.recoveryFor('invalid_geography_id_shape'),
-        });
-      }
+      if (shapeError) throw ctx.fail('invalid_geography_id_shape', shapeError);
     }
 
     ctx.log.info('fcc_compare_areas', {
@@ -266,7 +260,6 @@ export const compareAreasTool = tool('fcc_compare_areas', {
       throw ctx.fail(
         'no_data_found',
         `No area data found for ${geoIds.length} ${input.geography_type} geography IDs`,
-        { ...ctx.recoveryFor('no_data_found') },
       );
     }
 

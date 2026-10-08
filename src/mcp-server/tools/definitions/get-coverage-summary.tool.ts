@@ -33,7 +33,7 @@ export const getCoverageSummaryTool = tool('fcc_get_coverage_summary', {
       .enum(['acfosw', 'f', 'c', 'a', 'o', 's', 'w'])
       .default('acfosw')
       .describe(
-        'Technology filter. "acfosw" = any wired or fixed wireless (recommended baseline). "f" = fiber only. "c" = cable only. "a" = ADSL/DSL only. "s" = satellite only. "w" = fixed wireless only. Mix letters for combinations, e.g., "fc" = fiber or cable.',
+        'Technology filter, one value: "acfosw" = every technology (default, the recommended baseline). "f" = fiber, "c" = cable, "a" = ADSL/DSL, "o" = other (symmetric DSL, other copper, power line), "s" = satellite, "w" = fixed wireless.',
       ),
     speed_down: z
       .enum(['0.2', '4', '10', '25', '100', '250', '1000'])
@@ -169,23 +169,17 @@ export const getCoverageSummaryTool = tool('fcc_get_coverage_summary', {
       throw ctx.fail(
         'invalid_geography_combo',
         `geography_id is required for geography_type="${input.geography_type}"`,
-        { ...ctx.recoveryFor('invalid_geography_combo') },
       );
     }
     if (input.geography_type === 'nation' && input.geography_id) {
       throw ctx.fail(
         'invalid_geography_combo',
         'geography_id should be omitted for nation-level queries',
-        { ...ctx.recoveryFor('invalid_geography_combo') },
       );
     }
     if (input.geography_id) {
       const shapeError = geoidShapeError(input.geography_type, input.geography_id);
-      if (shapeError) {
-        throw ctx.fail('invalid_geography_id_shape', shapeError, {
-          ...ctx.recoveryFor('invalid_geography_id_shape'),
-        });
-      }
+      if (shapeError) throw ctx.fail('invalid_geography_id_shape', shapeError);
     }
 
     ctx.log.info('fcc_get_coverage_summary', {
@@ -217,7 +211,6 @@ export const getCoverageSummaryTool = tool('fcc_get_coverage_summary', {
       throw ctx.fail(
         'geography_not_found',
         `No area data found for geography type="${input.geography_type}", id="${geographyId}". Check the FIPS code format or try a different geography type.`,
-        { ...ctx.recoveryFor('geography_not_found') },
       );
     }
 
