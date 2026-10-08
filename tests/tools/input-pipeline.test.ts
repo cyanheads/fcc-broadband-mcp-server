@@ -139,6 +139,19 @@ describe('tool argument pipeline', () => {
       expect(rankedIds(result)).toEqual(IDS);
     });
 
+    it('repairs integers sent for string GEOIDs to their digits', async () => {
+      const result = (await runToolContract(compareAreasTool, {
+        geography_type: 'state',
+        geography_ids: [53, 41],
+      } as never)) as ToolResult;
+
+      expect(result.isError).toBeFalsy();
+      expect(mockGetAreaStatsBatch).toHaveBeenCalledWith(
+        expect.objectContaining({ geographyIds: ['53', '41'] }),
+        expect.anything(),
+      );
+    });
+
     it('still rejects a key that is neither client bookkeeping nor an alias', async () => {
       const result = (await runToolContract(compareAreasTool, {
         geography_type: 'state',
@@ -189,9 +202,10 @@ describe('tool argument pipeline', () => {
     });
 
     it('rejects a wrong-typed declared value the same way', async () => {
+      // Booleans: integers sent for these strings are repaired to their digits before the parse.
       const result = (await runToolContract(compareAreasTool, {
         geography_type: 'state',
-        geography_ids: [53, 6],
+        geography_ids: [true, false],
       } as never)) as ToolResult;
 
       expect(errorEnvelope(result).code).toBe(JsonRpcErrorCode.InvalidParams);
