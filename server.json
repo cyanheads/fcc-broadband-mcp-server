@@ -18,18 +18,8 @@
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "@cyanheads/fcc-broadband-mcp-server",
-      "runtimeHint": "node",
+      "runtimeHint": "npx",
       "version": "0.2.3",
-      "packageArguments": [
-        {
-          "type": "positional",
-          "value": "run"
-        },
-        {
-          "type": "positional",
-          "value": "start:stdio"
-        }
-      ],
       "environmentVariables": [
         {
           "name": "FCC_BDC_USERNAME",
@@ -79,19 +69,15 @@
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "@cyanheads/fcc-broadband-mcp-server",
-      "runtimeHint": "node",
+      "runtimeHint": "npx",
       "version": "0.2.3",
-      "packageArguments": [
-        {
-          "type": "positional",
-          "value": "run"
-        },
-        {
-          "type": "positional",
-          "value": "start:http"
-        }
-      ],
       "environmentVariables": [
+        {
+          "name": "MCP_TRANSPORT_TYPE",
+          "description": "Selects the HTTP transport.",
+          "format": "string",
+          "value": "http"
+        },
         {
           "name": "FCC_BDC_USERNAME",
           "description": "FCC account email for BDC API. Required for fcc_list_downloads and BDC filing periods.",
