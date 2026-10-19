@@ -6,6 +6,7 @@
 
 | Name | Description | Key Inputs | Annotations |
 |:-----|:------------|:-----------|:------------|
+| `fcc_search_geographies` | Discover distinct 2021 census place and CBSA GEOIDs by literal name substring; stable offset paging with one-row lookahead. | `name`, `geography_type`, `limit`, `offset` | `readOnlyHint: true, openWorldHint: false, idempotentHint: true` |
 | `fcc_search_availability` | Queries broadband providers and advertised speeds at a census block, filtered by technology and speed threshold. Answers "which ISPs serve this location and what speeds do they offer?" — the starting point for any address-level broadband lookup. Requires a 15-digit census block FIPS code; use `fcc_geocode_block` to convert coordinates first. | `block_fips`, `tech_filter`, `min_speed_down`, `consumer` | `readOnlyHint: true, openWorldHint: false` |
 | `fcc_get_coverage_summary` | Returns a broadband coverage summary for a geography — population with zero, one, two, or three-plus providers at a given speed threshold, split by urban/rural and tribal/non-tribal. Primary tool for digital divide and equity analysis. Supports state, county, congressional district, census place, CBSA, tribal area, and national level. | `geography_type`, `geography_id`, `tech_filter`, `speed_down`, `urban_rural_filter`, `tribal_filter` | `readOnlyHint: true, openWorldHint: false` |
 | `fcc_compare_areas` | Compares broadband coverage metrics across multiple geographies of the same type and returns a ranked table sorted by unserved or underserved population. Answers "which counties in this state have the worst broadband access?" and drives BEAD funding prioritization. | `geography_type`, `geography_ids`, `compare_all_states`, `tech_filter`, `speed_down`, `sort_by` | `readOnlyHint: true, openWorldHint: false` |
@@ -47,10 +48,10 @@ The digital divide and broadband equity angle is the dominant use case: an agent
 
 ## Requirements
 
-- All Form 477 data tools (`fcc_search_availability`, `fcc_get_coverage_summary`, `fcc_compare_areas`, `fcc_search_providers`, `fcc_get_provider`, `fcc_find_underserved`, `fcc_geocode_block`) work without any credentials
+- All Form 477 data tools (`fcc_search_availability`, `fcc_search_geographies`, `fcc_get_coverage_summary`, `fcc_compare_areas`, `fcc_search_providers`, `fcc_get_provider`, `fcc_find_underserved`, `fcc_geocode_block`) work without any credentials
 - BDC download tools (`fcc_list_filing_periods` with `include_bdc=true`, `fcc_list_downloads`) require a free FCC user account at broadbandmap.fcc.gov; credentials provided via env vars
 - No write operations — all data is ISP-reported and read-only
-- Geographic queries use FIPS codes; `fcc_geocode_block` bridges from coordinates
+- Geographic queries use FIPS codes; `fcc_geocode_block` bridges from coordinates and `fcc_search_geographies` bridges place/CBSA names
 - Form 477 data covers 2015–June 2021; BDC data covers June 2022 onward — the server bridges both eras, with a data gap noted in tool descriptions
 - Data is US federal government public domain (17 USC §105) — safe to distribute and cache
 - Rate limits: Socrata is generous for reasonable use; FCC Geo API has no documented limit; BDC API is 10 calls/min per account
@@ -61,7 +62,7 @@ The digital divide and broadband equity angle is the dominant use case: an agent
 
 | Service | Wraps | Used By |
 |:--------|:------|:--------|
-| `OpenDataService` | FCC Open Data Socrata API (`opendata.fcc.gov/resource/`) | `fcc_search_availability`, `fcc_get_coverage_summary`, `fcc_compare_areas`, `fcc_search_providers`, `fcc_get_provider`, `fcc_find_underserved` |
+| `OpenDataService` | FCC Open Data Socrata API (`opendata.fcc.gov/resource/`) | `fcc_search_availability`, `fcc_search_geographies`, `fcc_get_coverage_summary`, `fcc_compare_areas`, `fcc_search_providers`, `fcc_get_provider`, `fcc_find_underserved` |
 | `BdcApiService` | BDC Public Data API (`bdc.fcc.gov/api/public/map/`) | `fcc_list_filing_periods`, `fcc_list_downloads` |
 | `GeoApiService` | FCC Geo API (`geo.fcc.gov/api/census`) | `fcc_geocode_block` |
 
@@ -71,7 +72,7 @@ The digital divide and broadband equity angle is the dominant use case: an agent
 
 | Env Var | Required | Description |
 |:--------|:---------|:------------|
-| `FCC_BDC_USERNAME` | Optional | FCC account email for BDC API. Without this, `fcc_list_downloads` and BDC-era `fcc_list_filing_periods` return a `credentials_required` error. |
+| `FCC_BDC_USERNAME` | Optional | FCC account email for BDC API. Without both parsed credentials, `fcc_list_downloads` is hidden from MCP discovery and filing periods returns Form 477 dates only. |
 | `FCC_BDC_HASH_VALUE` | Optional | API token hash from broadbandmap.fcc.gov "Manage API Access" page. Paired with `FCC_BDC_USERNAME`. |
 | `FCC_OPENDATA_APP_TOKEN` | Optional | Socrata app token. Increases rate limits; not required for functionality. |
 
@@ -126,31 +127,32 @@ Each step is independently testable.
 ```ts
 {
   geography: z.object({ type: z.string(), id: z.string(), name: z.string().optional() }),
-  tech_filter: z.string(),
-  speed_down_mbps: z.number(),
+  techFilter: z.string(),
+  speedDownMbps: z.number(),
   population: z.object({
-    no_coverage: z.number().describe('Population living where zero providers offer service at the given speed.'),
-    one_provider: z.number().describe('Population with exactly one provider — no competitive choice.'),
-    two_providers: z.number(),
-    three_or_more_providers: z.number(),
+    noCoverage: z.number().describe('Population living where zero providers offer service at the given speed.'),
+    oneProvider: z.number().describe('Population with exactly one provider — no competitive choice.'),
+    twoProviders: z.number(),
+    threeOrMore: z.number(),
     total: z.number(),
   }),
-  coverage_pct: z.number().describe('Percentage of population with at least one provider at the given speed.'),
-  unserved_pct: z.number().describe('Percentage with zero providers — FCC "unserved" definition.'),
-  competitive_pct: z.number().describe('Percentage with two or more providers.'),
+  coveragePct: z.number().describe('Percentage of population with at least one provider at the given speed.'),
+  unservedPct: z.number().describe('Percentage with zero providers — FCC "unserved" definition.'),
+  competitivePct: z.number().describe('Percentage with two or more providers.'),
   breakdown: z.array(z.object({
-    urban_rural: z.enum(['R', 'U']),
+    urbanRural: z.enum(['R', 'U']),
     tribal: z.enum(['T', 'N']),
-    population: z.object({ no_coverage: z.number(), one_provider: z.number(), two_providers: z.number(), three_or_more_providers: z.number(), total: z.number() }),
-    coverage_pct: z.number(),
-    unserved_pct: z.number(),
+    population: z.object({ noCoverage: z.number(), oneProvider: z.number(), twoProviders: z.number(), threeOrMore: z.number(), total: z.number() }),
+    coveragePct: z.number(),
+    unservedPct: z.number(),
   })).describe('Per-segment breakdown by urban/rural and tribal/non-tribal.'),
+  dataVintage: z.string(),
 }
 ```
 
 **Error contract:**
-- `geography_not_found` (`NotFound`): Geography ID not in dataset. Suggest checking FIPS code format or calling `fcc_list_filing_periods`.
-- `invalid_geography_combo` (`InvalidParams`): `geography_id` omitted for a non-nation type, or `geography_type` is `nation` but `geography_id` provided.
+- `geography_not_found` (`NotFound`): No Area Table rows for the selected geography. Check the type's GEOID shape; use `fcc_search_geographies` to discover place/CBSA identifiers.
+- `invalid_geography_combo` (`ValidationError`): `geography_id` omitted for a non-nation type, or `geography_type` is `nation` but `geography_id` provided.
 
 ---
 
@@ -267,7 +269,7 @@ Each step is independently testable.
 **As-of date validation** runs in two stages, split by what each one needs. A date that is not on the calendar, or that falls before `BDC_FIRST_AS_OF_DATE` (2022-06-30), is answerable from the string alone and is rejected ahead of the credentials check. Membership in the published set is only knowable from the credentialed `/listAsOfDates` endpoint, so it runs after that check; the answer is memoized for an hour so the check does not double every call against the API's 10-calls-per-minute budget.
 
 **Error contract:**
-- `credentials_required` (`Unauthorized`): `FCC_BDC_USERNAME` or `FCC_BDC_HASH_VALUE` env vars not set. Set them from the broadbandmap.fcc.gov "Manage API Access" page.
+- `credentials_required` (`Unauthorized`): service-level guard when either BDC credential is absent. Startup hides the download tool from MCP discovery in that configuration; its landing card explains setup.
 - `invalid_as_of_date` (`ValidationError`): the date is not on the calendar, predates the first BDC filing period, or is not among the as-of dates the BDC API publishes. The thrown `recovery.hint` says which of the three it was.
 
 ---
@@ -340,9 +342,13 @@ Tech codes: 0 = All other, 10–12 = DSL (ADSL, ADSL2, VDSL), 20 = DSL (symmetri
 
 ## Design Decisions
 
+**Geography discovery stays live and vintage-bound.** `fcc_search_geographies` queries `v5vt-e7vw` with text `year='2021'`, `contains(upper(name), ...)`, escaped SQL literals and LIKE metacharacters, grouping by type/GEOID/name and ordering by name/type/GEOID. The mirror drops year and cannot select this vintage. One extra row determines continuation without a count query. Distinct named matches survive; no state filter is exposed because CBSA codes and name suffixes cannot establish exhaustive state membership.
+
+**National identity is local.** `getGeographyName('nation', ...)` returns `United States` before any mirror or network read because the lookup has no nation row. Coverage and the geography resource retain the Area Table's required `id='0'`; non-national names remain optional and fail-soft.
+
 **Tool prefix: `fcc_` not `fcc_broadband_`.** The server name `fcc-broadband-mcp-server` implies the prefix is `fcc_broadband_`, but that makes every tool name 17+ characters before the verb-noun pair. The server's context makes "broadband" implicit — `fcc_get_coverage_summary` is clearer than `fcc_broadband_get_coverage_summary`. Short, clear prefixes reduce cognitive load in tool-selection contexts.
 
-**Auth-optional design.** The BDC tools require credentials but the server runs without them — those tools return `credentials_required` with a clear setup hint. The no-auth tools always work. This mirrors the actual data access model: most analysis uses the public Socrata data; the BDC download API serves bulk data processing and data pipeline workflows.
+**Auth-optional design.** Startup loads configuration before deciding whether to advertise `fcc_list_downloads`. Both parsed BDC credentials enable it; otherwise a disabled landing card explains setup while MCP clients receive the usable tools. Filing periods still returns Form 477 dates, and its guidance reflects the same parsed configuration. Most analysis uses public Socrata data; the credentialed BDC API serves bulk-download discovery.
 
 **Form 477 vs. BDC.** The Form 477 datasets (2015–2021) are queryable row-by-row via Socrata. The post-2022 BDC data is only accessible via bulk CSV downloads from the authenticated API — not row-level queries. The server wraps what's queryable at the row level. A future enhancement could pre-load and index BDC CSVs into a local DuckDB instance; this design scopes to the API-accessible layer and notes the data ceiling clearly.
 
@@ -382,7 +388,7 @@ Base URL: `https://opendata.fcc.gov/resource/{dataset_id}.json`
 
 SoQL query parameters:
 - `$limit`, `$offset` — pagination (default 1000, max 50000)
-- `$where` — SQL-like filter (URL-encode single quotes as `%27` in `$where` clauses)
+- `$where` — SQL-like filter (double apostrophes inside string literals before URL encoding; URL encoding alone does not escape SoQL literals)
 - `$select`, `$group` — projection and aggregation
 - Field equality: `?stateabbr=WA` or `?type=county`
 
@@ -393,6 +399,8 @@ SoQL query parameters:
 `GET https://geo.fcc.gov/api/census/block/find?latitude={lat}&longitude={lon}&censusYear=2010&format=json`
 
 Returns: `Block.FIPS` (15-digit census block), `County.FIPS`, `County.name`, `State.FIPS`, `State.code`, `State.name`
+
+HTTP 400 bodies with `statusMessage.severity` of `FATAL` or `ERROR` and nonblank string `code` and `routine` fields are backend faults: retry them, then report `geo_backend_unavailable` (`ServiceUnavailable`) with retry-later guidance. Other HTTP 400 responses remain `InvalidParams`, so genuine parameter errors do not retry.
 
 No auth required. No documented rate limit.
 

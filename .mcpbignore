@@ -7,6 +7,12 @@
 /logs/
 /.cache/
 /tests/
+/coverage/
+/src/
+/scripts/
+/docs/
+/.github/
+/.vscode/
 /Dockerfile
 /bun.lock
 /bunfig.toml

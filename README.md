@@ -1,13 +1,13 @@
 <div align="center">
   <h1>@cyanheads/fcc-broadband-mcp-server</h1>
   <p><b>Access FCC broadband availability, coverage analysis, and digital divide data for US geographies and census blocks via MCP. STDIO or Streamable HTTP.</b>
-  <div>9 Tools • 2 Resources • 1 Prompt</div>
+  <div>10 Tools • 2 Resources • 1 Prompt</div>
   </p>
 </div>
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/Version-0.2.4-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/users/cyanheads/packages/container/package/fcc-broadband-mcp-server) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-^2.2.0-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![npm](https://img.shields.io/npm/v/@cyanheads/fcc-broadband-mcp-server?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@cyanheads/fcc-broadband-mcp-server) [![TypeScript](https://img.shields.io/badge/TypeScript-^7.0.2-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.4.2-blueviolet.svg?style=flat-square)](https://bun.sh/)
+[![Version](https://img.shields.io/badge/Version-0.2.4-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/users/cyanheads/packages/container/package/fcc-broadband-mcp-server) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-^2.3.1-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![npm](https://img.shields.io/npm/v/@cyanheads/fcc-broadband-mcp-server?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@cyanheads/fcc-broadband-mcp-server) [![TypeScript](https://img.shields.io/badge/TypeScript-^7.0.2-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.4.3-blueviolet.svg?style=flat-square)](https://bun.sh/)
 
 </div>
 
@@ -29,7 +29,7 @@
 
 ## Overview
 
-FCC broadband data from Form 477 (June 2015 – June 2021) and the Broadband Data Collection (June 2022 onward). Geocode coordinates to census blocks, look up the ISPs and advertised speeds at a block, and summarize, compare, or rank geographies by unserved population for BEAD and equity research. Runs as a stdio process, a local Streamable HTTP server, or the public hosted endpoint above.
+FCC broadband data from Form 477 (June 2015 – June 2021) and the Broadband Data Collection (June 2022 onward). Geocode coordinates to census blocks, look up the ISPs and advertised speeds at a block, and summarize, compare, or rank geographies by unserved population for BEAD and equity research.
 
 ### Tools
 
@@ -37,6 +37,7 @@ FCC broadband data from Form 477 (June 2015 – June 2021) and the Broadband Dat
 |:---|:---|
 | `fcc_geocode_block` | Convert a lat/lon coordinate to a 2010-vintage census block FIPS code, with county and state identifiers |
 | `fcc_search_availability` | List the providers and advertised speeds at a census block, filtered by technology and speed |
+| `fcc_search_geographies` | Find place and CBSA GEOIDs by name for coverage queries |
 | `fcc_get_coverage_summary` | Population by provider count for one geography, split by urban/rural and tribal/non-tribal |
 | `fcc_compare_areas` | Rank coverage across several geographies of the same type, worst first |
 | `fcc_find_underserved` | Rank the most underserved areas in a state or nationwide by unserved population |
@@ -65,7 +66,7 @@ Resource data is also reachable through tools: `fcc_get_coverage_summary` for ge
 ### `fcc_geocode_block` <sub>tool</sub>
 
 - `latitude` and `longitude` in decimal degrees, resolved against 2010 census boundaries through the FCC Geo API
-- Returns `blockFips` (15 digits, ready for `fcc_search_availability`), `censusVintage`, `countyFips`, `countyName`, `stateFips`, `stateCode`, and `stateName`; coordinates over water or outside US coverage fail as `block_not_found`
+- Returns `blockFips` (15 digits, ready for `fcc_search_availability`), `censusVintage`, `countyFips`, `countyName`, `stateFips`, `stateCode`, and `stateName`; coordinates over water or outside US coverage fail as `block_not_found`. Structured FCC backend faults fail as `geo_backend_unavailable` with guidance to retry the same coordinates later
 
 ---
 
@@ -76,10 +77,19 @@ Resource data is also reachable through tools: `fcc_get_coverage_summary` for ge
 
 ---
 
+### `fcc_search_geographies` <sub>tool</sub>
+
+- Required nonblank `name` matches a case-insensitive literal substring; optional `geography_type` is `place` or `cbsa`, `limit` defaults to 20 (max 100), and `offset` starts at 0
+- Returns distinct `{ geography_type, geography_id, name }` matches in stable name/type/GEOID order, plus `count`, `offset`, and `nextOffset` only when more matches remain. Empty and past-end pages carry guidance; no total count is computed
+- Uses the live FCC lookup with `year='2021'` even when the mirror is enabled. Include a location qualifier in `name` to narrow matches; CBSA codes do not establish state membership. Pass the selected type and GEOID to `fcc_get_coverage_summary`
+
+---
+
 ### `fcc_get_coverage_summary` <sub>tool</sub>
 
 - `geography_type` is one of `nation`, `state`, `county`, `cd`, `place`, `cbsa`, `tribal`; `geography_id` is required for every type but `nation`; `urban_rural_filter` (`all` / `R` / `U`) and `tribal_filter` (`all` / `T` / `N`) narrow the population
 - Returns `population` by provider count (`noCoverage`, `oneProvider`, `twoProviders`, `threeOrMore`, `total`), `coveragePct`, `unservedPct`, `competitivePct`, and a per-segment `breakdown`; fails as `geography_not_found`, `invalid_geography_combo`, or `invalid_geography_id_shape`
+- National coverage is named `United States` locally and retains `geography.id: "0"`; it needs no geography-name lookup
 
 ---
 
@@ -122,7 +132,8 @@ Resource data is also reachable through tools: `fcc_get_coverage_summary` for ge
 ### `fcc_list_downloads` <sub>tool</sub>
 
 - `as_of_date` (`YYYY-MM-DD`) is required; filter by `data_type` (`availability` default, or `challenge`), `category` (`Summary`, `State`, `Provider`), `technology_type` (`Fixed Broadband`, `Mobile Broadband`, `Mobile Voice`), `state`, and `provider_name`; `limit` defaults to 50 (max 200), paged with `offset`
-- Returns file metadata and a `downloadUrl` per file, not file contents; `totalFiles` counts every match and `nextOffset` is omitted on the last page. Fails as `credentials_required` or `invalid_as_of_date`
+- Returns file metadata and a `downloadUrl` per file, not file contents; `totalFiles` counts every match and `nextOffset` is omitted on the last page. Fails as `invalid_as_of_date` for an unsupported date
+- Available to MCP clients only when both BDC credentials are configured at startup. Otherwise the HTTP landing page retains its disabled card and setup guidance
 
 ---
 
@@ -152,7 +163,7 @@ Built on [`@cyanheads/mcp-ts-core`](https://github.com/cyanheads/mcp-ts-core): s
 FCC-specific:
 
 - Three FCC sources, all US government public-domain data: Form 477 on FCC Open Data (Socrata), the BDC Public Data API, and the FCC Geo API
-- Every Form 477 tool and resource works without credentials and reads the June 2021 filing, the last one; BDC data is exposed only as bulk-file manifests, and `fcc_list_downloads` needs `FCC_BDC_USERNAME` and `FCC_BDC_HASH_VALUE`, failing as `credentials_required` without them
+- Every Form 477 tool and resource works without credentials and reads the June 2021 filing, the last one; BDC data is exposed only as bulk-file manifests. `fcc_list_downloads` is advertised to MCP clients only when both `FCC_BDC_USERNAME` and `FCC_BDC_HASH_VALUE` are configured
 - The area tools share one vocabulary: `tech_filter` letters (`acfosw` for every technology, the default; `a` DSL, `c` cable, `f` fiber, `o` other, `s` satellite, `w` fixed wireless) and `speed_down` tiers (`0.2`, `4`, `10`, `25`, `100`, `250`, `1000` Mbps; default `25`, and `100` is the BEAD threshold)
 - Coverage analysis reads the pre-aggregated Area Table (`xvwq-qtaj`), not the block-level deployment table, so state- and county-scale queries stay fast
 - Optional local Form 477 mirror (`FCC_MIRROR_ENABLED=true`) serves queries from SQLite, falling back to the live API for anything not ingested
@@ -278,6 +289,8 @@ cp .env.example .env
 
 See [`.env.example`](./.env.example) for the full list of optional overrides.
 
+BDC credentials can come from the process environment or `.env`; process values take precedence. Empty, whitespace-only, and unsubstituted placeholder values count as absent. Restart after configuring both credentials to enable `fcc_list_downloads`; Form 477 filing periods remain available without them.
+
 ## Running the server
 
 ### Local development
@@ -324,6 +337,7 @@ bun run mirror:verify                   # coverage, row counts, SQLite integrity
 Then set `FCC_MIRROR_ENABLED=true`. In Docker, run the same scripts with `docker exec <container> bun run mirror:init -- --states 11,53`. Run them from a source checkout or the image: the scripts import through the `@/` path alias, which an npm install does not map.
 
 - Block and geography lookups serve from the mirror once the queried state is fully ingested; anything else falls back to the live API.
+- `fcc_search_geographies` always uses the live lookup: the mirror does not retain its year column.
 - `fcc_search_providers`, `fcc_get_provider`, and geographies with no state in their GEOID (`cbsa`, `tribal`, `nation`) serve from the mirror only after a `--full` ingest.
 - Mirror name search matches word prefixes (`comc` finds "Comcast") where the live API matches any substring (`mcast`), so a mid-word fragment can return fewer results.
 - The ingest is idempotent and resumes an interrupted run from its saved cursor. Set `FCC_OPENDATA_APP_TOKEN` first for a full ingest. Bun uses the built-in `bun:sqlite`; Node.js needs the optional `better-sqlite3` peer dependency.
@@ -334,7 +348,7 @@ Then set `FCC_MIRROR_ENABLED=true`. In Docker, run the same scripts with `docker
 |:---|:---|
 | `src/index.ts` | `createApp()` entry point — registers tools, resources, and prompts and inits services. |
 | `src/config` | Server-specific environment variable parsing and validation with Zod. |
-| `src/mcp-server/tools` | Tool definitions (`*.tool.ts`). Nine tools across FCC Open Data, the BDC API, and the Geo API. |
+| `src/mcp-server/tools` | Tool definitions (`*.tool.ts`). Ten tools across FCC Open Data, the BDC API, and the Geo API. |
 | `src/mcp-server/resources` | Resource definitions (`*.resource.ts`). Geography summary and provider directory. |
 | `src/mcp-server/prompts` | Prompt definitions (`*.prompt.ts`). Broadband equity analysis prompt. |
 | `src/services/open-data` | FCC Open Data (Socrata) service for Form 477 deployment, area, and provider tables; `mirror/` holds the local SQLite mirror. |
