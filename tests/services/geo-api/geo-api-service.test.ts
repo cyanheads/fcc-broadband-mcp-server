@@ -40,8 +40,128 @@ function stubFetch(body: GeoApiBlockResponse): ReturnType<typeof vi.fn> {
 
 describe('GeoApiService.findBlock', () => {
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.clearAllMocks();
+  });
+
+  it('keeps a genuine parameter-error HTTP 400 as InvalidParams without retry', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockImplementation(() =>
+        Promise.resolve(
+          new Response(JSON.stringify({ statusMessage: 'missing lat.' }), { status: 400 }),
+        ),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(
+      makeService().findBlock(47.6062, -122.3321, createMockContext()),
+    ).rejects.toMatchObject({
+      code: JsonRpcErrorCode.InvalidParams,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries captured backend HTTP 400 faults and reports service recovery', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            status: 'error',
+            statusCode: '400',
+            statusMessage: {
+              name: 'error',
+              severity: 'FATAL',
+              code: '28000',
+              file: 'auth.c',
+              routine: 'ClientAuthentication',
+            },
+          }),
+          { status: 400 },
+        ),
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const rejection = expect(
+      makeService().findBlock(47.6062, -122.3321, createMockContext()),
+    ).rejects.toMatchObject({
+      code: JsonRpcErrorCode.ServiceUnavailable,
+      data: {
+        reason: 'geo_backend_unavailable',
+        recovery: { hint: expect.stringContaining('later') },
+      },
+    });
+    await Promise.all([vi.runAllTimersAsync(), rejection]);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
+  it.each([
+    'not JSON',
+    '{"statusMessage":',
+    'null',
+    JSON.stringify({
+      statusMessage: { severity: 'FATAL', code: '', routine: 'ClientAuthentication' },
+    }),
+    JSON.stringify({ statusMessage: { severity: 'ERROR', code: '28000', routine: ' ' } }),
+    JSON.stringify({
+      statusMessage: { severity: 'WARNING', code: '28000', routine: 'ClientAuthentication' },
+    }),
+    JSON.stringify({
+      statusMessage: { severity: 'FATAL', code: 28000, routine: 'ClientAuthentication' },
+    }),
+  ])('keeps ordinary HTTP classification for non-backend body %s', async (body) => {
+    const fetchMock = vi
+      .fn()
+      .mockImplementation(() => Promise.resolve(new Response(body, { status: 400 })));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(
+      makeService().findBlock(47.6062, -122.3321, createMockContext()),
+    ).rejects.toMatchObject({ code: JsonRpcErrorCode.InvalidParams });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('recovers from ERROR backend faults on a later attempt', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ statusMessage: { severity: 'ERROR', code: 'XX000', routine: 'query' } }),
+          { status: 400 },
+        ),
+      )
+      .mockResolvedValue(jsonResponse(SEATTLE_2010));
+    vi.stubGlobal('fetch', fetchMock);
+    const pending = makeService().findBlock(47.6062, -122.3321, createMockContext());
+    await vi.runAllTimersAsync();
+    expect(await pending).toMatchObject({
+      blockFips: SEATTLE_2010.Block!.FIPS,
+      censusVintage: '2010',
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('honors cancellation during backend-fault backoff', async () => {
+    vi.useFakeTimers();
+    const controller = new AbortController();
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            statusMessage: { severity: 'ERROR', code: 'XX000', routine: 'query' },
+          }),
+          { status: 400 },
+        ),
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const rejection = expect(
+      makeService().findBlock(47.6062, -122.3321, createMockContext({ signal: controller.signal })),
+    ).rejects.toThrow('cancelled by caller');
+    setTimeout(() => controller.abort(new Error('cancelled by caller')), 500);
+    await Promise.all([vi.runAllTimersAsync(), rejection]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('pins censusYear=2010 so the block matches the Form 477 deployment dataset', async () => {

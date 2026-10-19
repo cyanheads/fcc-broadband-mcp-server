@@ -4,7 +4,7 @@
  * @module services/geo-api/geo-api-service
  */
 
-import type { Context } from '@cyanheads/mcp-ts-core';
+import { type Context, z } from '@cyanheads/mcp-ts-core';
 import type { AppConfig } from '@cyanheads/mcp-ts-core/config';
 import { serviceUnavailable } from '@cyanheads/mcp-ts-core/errors';
 import type { StorageService } from '@cyanheads/mcp-ts-core/storage';
@@ -21,6 +21,14 @@ const TIMEOUT_MS = 15_000;
  * row. Pinned here so a geocoded block feeds fcc_search_availability directly.
  */
 const CENSUS_YEAR = '2010';
+
+const BackendFaultSchema = z.object({
+  statusMessage: z.object({
+    severity: z.enum(['FATAL', 'ERROR']),
+    code: z.string().trim().min(1),
+    routine: z.string().trim().min(1),
+  }),
+});
 
 export class GeoApiService {
   constructor(
@@ -51,7 +59,28 @@ export class GeoApiService {
         }
 
         if (!response.ok) {
-          throw await httpErrorFromResponse(response, { service: 'FCC Geo API' });
+          const error = await httpErrorFromResponse(response, { service: 'FCC Geo API' });
+          if (response.status === 400 && typeof error.data?.body === 'string') {
+            let body: unknown;
+            try {
+              body = JSON.parse(error.data.body);
+            } catch {
+              throw error;
+            }
+            if (BackendFaultSchema.safeParse(body).success) {
+              throw serviceUnavailable(
+                'FCC Geo API backend is temporarily unavailable.',
+                {
+                  reason: 'geo_backend_unavailable',
+                  recovery: {
+                    hint: 'Retry these coordinates later; the FCC Geo API backend is temporarily unavailable.',
+                  },
+                },
+                { cause: error },
+              );
+            }
+          }
+          throw error;
         }
 
         const raw = (await response.json()) as GeoApiBlockResponse;

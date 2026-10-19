@@ -55,6 +55,15 @@ export const geocodeBlockTool = tool('fcc_geocode_block', {
 
   errors: [
     {
+      reason: 'geo_backend_unavailable',
+      code: JsonRpcErrorCode.ServiceUnavailable,
+      when: 'The FCC Geo API reports a structured backend fault with HTTP 400.',
+      recovery:
+        'Retry these coordinates later; the FCC Geo API backend is temporarily unavailable.',
+      retryable: true,
+      thrownBy: 'service',
+    },
+    {
       reason: 'block_not_found',
       code: JsonRpcErrorCode.NotFound,
       when: 'No census block found at the given coordinates — may be over water or outside US coverage.',
