@@ -4,7 +4,7 @@
  */
 
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
-import { createMockContext, getEnrichment } from '@cyanheads/mcp-ts-core/testing';
+import { createMockContext, getEnrichment, runToolContract } from '@cyanheads/mcp-ts-core/testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { listDownloadsTool } from '@/mcp-server/tools/definitions/list-downloads.tool.js';
 
@@ -59,6 +59,36 @@ describe('listDownloadsTool', () => {
     expect(result.totalFiles).toBe(1);
     expect(result.files[0]!.fileId).toBe('file-001');
     expect(result.files[0]!.downloadUrl).toContain('broadbandmap.fcc.gov');
+  });
+
+  it.each([false, true])('renders optional manifest filters when present=%s', async (filtered) => {
+    const result = await runToolContract(listDownloadsTool, {
+      as_of_date: '2024-06-30',
+      ...(filtered && {
+        category: 'State',
+        technology_type: 'Fixed Broadband',
+        state: 'WA',
+        provider_name: 'Comcast',
+      }),
+    });
+    expect(result.isError).not.toBe(true);
+    expect(result.structuredContent).toMatchObject({
+      totalFiles: 1,
+      files: [{ fileId: 'file-001' }],
+    });
+    const rendered = JSON.stringify(result.content);
+    expect(rendered).toContain('As-of date:** 2024-06-30');
+    if (filtered) {
+      for (const value of [
+        'Category:** State',
+        'Technology:** Fixed Broadband',
+        'State:** WA',
+        'Comcast',
+      ])
+        expect(rendered).toContain(value);
+    } else {
+      expect(rendered).not.toContain('- **Category:**');
+    }
   });
 
   it('passes all filters to service when provided', async () => {

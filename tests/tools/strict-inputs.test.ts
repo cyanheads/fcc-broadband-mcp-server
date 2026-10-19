@@ -24,6 +24,7 @@ const MINIMAL_VALID_INPUT: Record<string, Record<string, unknown>> = {
   fcc_search_availability: { block_fips: '530330081002024' },
   fcc_get_coverage_summary: { geography_type: 'state', geography_id: '53' },
   fcc_search_providers: {},
+  fcc_search_geographies: { name: 'Casper' },
   fcc_get_provider: { hoconum: '130317' },
   fcc_compare_areas: { geography_type: 'state', geography_ids: ['53', '06'] },
   fcc_find_underserved: {},

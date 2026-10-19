@@ -4,7 +4,7 @@
  */
 
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
-import { createMockContext, getEnrichment } from '@cyanheads/mcp-ts-core/testing';
+import { createMockContext, getEnrichment, runToolContract } from '@cyanheads/mcp-ts-core/testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { getCoverageSummaryTool } from '@/mcp-server/tools/definitions/get-coverage-summary.tool.js';
 
@@ -56,6 +56,36 @@ describe('getCoverageSummaryTool', () => {
     expect(getEnrichment(ctx)).toMatchObject({
       appliedFilters: { geographyType: 'state', geographyId: '28', speedDownMbps: 25 },
     });
+  });
+
+  it('renders zero population without NaN when the name lookup fails', async () => {
+    mockGetGeographyName.mockRejectedValue(new Error('lookup unavailable'));
+    mockGetAreaSegments.mockResolvedValue([
+      {
+        urbanRural: 'U',
+        tribal: 'T',
+        population: { noCoverage: 0, oneProvider: 0, twoProviders: 0, threeOrMore: 0, total: 0 },
+        coveragePct: 0,
+        unservedPct: 0,
+        competitivePct: 0,
+      },
+    ]);
+    const result = await runToolContract(getCoverageSummaryTool, {
+      geography_type: 'county',
+      geography_id: '53033',
+    });
+    expect(result.isError).not.toBe(true);
+    expect(result.structuredContent).toMatchObject({
+      geography: { type: 'county', id: '53033' },
+      coveragePct: 0,
+      competitivePct: 0,
+      unservedPct: 0,
+    });
+    const text = JSON.stringify(result.content);
+    expect(text).toContain('county 53033');
+    expect(text).toContain('| Urban | Tribal |');
+    expect(text).not.toContain('NaN');
+    expect(text).toContain('0%');
   });
 
   it('returns nation-level summary without geography_id', async () => {

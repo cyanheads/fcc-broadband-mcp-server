@@ -11,6 +11,7 @@ export { getProviderTool } from './get-provider.tool.js';
 export { listDownloadsTool } from './list-downloads.tool.js';
 export { listFilingPeriodsTool } from './list-filing-periods.tool.js';
 export { searchAvailabilityTool } from './search-availability.tool.js';
+export { searchGeographiesTool } from './search-geographies.tool.js';
 export { searchProvidersTool } from './search-providers.tool.js';
 
 import { compareAreasTool } from './compare-areas.tool.js';
@@ -21,11 +22,13 @@ import { getProviderTool } from './get-provider.tool.js';
 import { listDownloadsTool } from './list-downloads.tool.js';
 import { listFilingPeriodsTool } from './list-filing-periods.tool.js';
 import { searchAvailabilityTool } from './search-availability.tool.js';
+import { searchGeographiesTool } from './search-geographies.tool.js';
 import { searchProvidersTool } from './search-providers.tool.js';
 
 export const allToolDefinitions = [
   geocodeBlockTool,
   searchAvailabilityTool,
+  searchGeographiesTool,
   getCoverageSummaryTool,
   searchProvidersTool,
   getProviderTool,

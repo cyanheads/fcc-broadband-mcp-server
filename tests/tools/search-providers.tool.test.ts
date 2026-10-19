@@ -4,7 +4,7 @@
  */
 
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
-import { createMockContext, getEnrichment } from '@cyanheads/mcp-ts-core/testing';
+import { createMockContext, getEnrichment, runToolContract } from '@cyanheads/mcp-ts-core/testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { searchProvidersTool } from '@/mcp-server/tools/definitions/search-providers.tool.js';
 import type { ProviderRecord, ProviderSearchResult } from '@/services/open-data/types.js';
@@ -35,6 +35,20 @@ function sampledScan(providers: ProviderRecord[] = MOCK_PROVIDERS): ProviderSear
 }
 
 describe('searchProvidersTool', () => {
+  it.each([false, true])('renders provider search filters when populated=%s', async (filtered) => {
+    mockSearchProviders.mockResolvedValue({ providers: MOCK_PROVIDERS, matched: 1 });
+    const result = await runToolContract(
+      searchProvidersTool,
+      filtered ? { name_search: 'Comcast', state: 'WA', tech_filter: ['50'] } : {},
+    );
+    expect(result.isError).not.toBe(true);
+    expect(result.structuredContent).toMatchObject({ totalFound: 1 });
+    const rendered = JSON.stringify(result.content);
+    if (filtered) {
+      for (const value of ['Name search:', 'Comcast', 'State:** WA', 'Tech filter:** 50'])
+        expect(rendered).toContain(value);
+    } else expect(rendered).toContain('Applied Filters:** none');
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     mockSearchProviders.mockResolvedValue(completeScan());

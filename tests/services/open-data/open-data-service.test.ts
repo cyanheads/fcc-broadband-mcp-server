@@ -34,6 +34,124 @@ function makeService(mirror?: Form477Mirror): OpenDataService {
   return new OpenDataService({} as AppConfig, {} as StorageService, serverConfig, mirror);
 }
 
+describe('OpenDataService sparse upstream records', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it.each([true, false])(
+    'normalizes missing deployment fields with consumer=%s filters',
+    async (consumer) => {
+      const fetchMock = vi.fn<typeof fetch>(async () => new Response('[{}]'));
+      vi.stubGlobal('fetch', fetchMock);
+      const rows = await makeService().getDeploymentByBlock(
+        '530330081021016',
+        {
+          techCodes: ['50'],
+          minSpeedDown: 100,
+          consumer,
+        },
+        createMockContext(),
+      );
+      expect(rows).toEqual([
+        {
+          blockFips: '530330081021016',
+          providerId: '',
+          providerName: '',
+          holdingCompanyName: '',
+          hoconum: '',
+          stateAbbr: '',
+          techCode: '',
+          maxDownloadMbps: 0,
+          maxUploadMbps: 0,
+          consumer: false,
+          business: false,
+        },
+      ]);
+      const where = new URL(String(fetchMock.mock.calls[0]?.[0])).searchParams.get('$where');
+      expect(where).toContain("techcode IN ('50')");
+      expect(where).toContain('maxaddown>=100');
+      expect(where).toContain(consumer ? "consumer='1'" : "business='1'");
+    },
+  );
+
+  it('normalizes omitted area populations and labels without inventing coverage', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response('[{}]'));
+    vi.stubGlobal('fetch', fetchMock);
+    const rows = await makeService().getAreaSegments(
+      {
+        geographyType: 'county',
+        techFilter: 'acfosw',
+        speedDown: '25',
+        urbanRuralFilter: 'R',
+        tribalFilter: 'T',
+      },
+      createMockContext(),
+    );
+    expect(rows).toEqual([
+      {
+        urbanRural: 'U',
+        tribal: 'N',
+        population: { noCoverage: 0, oneProvider: 0, twoProviders: 0, threeOrMore: 0, total: 0 },
+        coveragePct: 0,
+        unservedPct: 0,
+        competitivePct: 0,
+      },
+    ]);
+    const where = new URL(String(fetchMock.mock.calls[0]?.[0])).searchParams.get('$where');
+    expect(where).toContain("urban_rural='R'");
+    expect(where).toContain("tribal_non='T'");
+  });
+
+  it('accumulates sparse repeated area rows into one bounded geography result', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('[{}, {}, {"id":"53","has_0":"2"}, {"id":"53","has_1":"3"}]')),
+    );
+    const rows = await makeService().getAreaStatsBatch(
+      { geographyType: 'state', geographyIds: ['53'], techFilter: 'acfosw', speedDown: '25' },
+      createMockContext(),
+    );
+    expect(rows).toEqual([
+      {
+        id: '',
+        type: 'state',
+        tech: 'acfosw',
+        speed: '25',
+        noCoverage: 0,
+        oneProvider: 0,
+        twoProviders: 0,
+        threeOrMore: 0,
+        total: 0,
+      },
+      {
+        id: '53',
+        type: 'state',
+        tech: 'acfosw',
+        speed: '25',
+        noCoverage: 2,
+        oneProvider: 3,
+        twoProviders: 0,
+        threeOrMore: 0,
+        total: 5,
+      },
+    ]);
+  });
+
+  it('omits incomplete geography names while preserving complete matches', async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response('[{"geoid":"53","name":"Washington"},{"geoid":"11"},{"name":"Missing id"}]'),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    expect(
+      await makeService().getGeographyNames('state', ['53', '11'], createMockContext()),
+    ).toEqual(new Map([['53', 'Washington']]));
+    expect(await makeService().getGeographyNames('state', [], createMockContext())).toEqual(
+      new Map(),
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
 /** One Area Table row in the shape Socrata returns — every value a string. */
 function areaRow(id: string, urbanRural: 'R' | 'U'): RawAreaRow {
   return {

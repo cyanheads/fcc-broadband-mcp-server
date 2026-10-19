@@ -4,13 +4,14 @@
  */
 
 import { tool, z } from '@cyanheads/mcp-ts-core';
+import { getServerConfig } from '@/config/server-config.js';
 import { getBdcApiService } from '@/services/bdc-api/bdc-api-service.js';
 
 export const listFilingPeriodsTool = tool('fcc_list_filing_periods', {
   title: 'List Filing Periods',
   description:
     'Returns available data vintages: Form 477 filing periods (hardcoded Jun 2015 – Jun 2021, always available) and BDC as-of dates from the authenticated API (Jun 2022 onward, requires credentials). ' +
-    'Call this before fcc_list_downloads to determine valid as_of_date values. ' +
+    'When hasBdcCredentials is true, call this before fcc_list_downloads to determine valid as_of_date values. ' +
     'Note: there is a data gap between June 2021 (last Form 477) and June 2022 (first BDC filing period).',
   annotations: { readOnlyHint: true, openWorldHint: false, idempotentHint: true },
 
@@ -59,6 +60,8 @@ export const listFilingPeriodsTool = tool('fcc_list_filing_periods', {
   async handler(input, ctx) {
     ctx.log.info('fcc_list_filing_periods', { includeBdc: input.include_bdc });
     const service = getBdcApiService();
+    const config = getServerConfig();
+    const hasBdcCredentials = !!(config.bdcUsername && config.bdcHashValue);
 
     const periods = await service.listFilingPeriods({ includeBdc: input.include_bdc }, ctx);
 
@@ -77,10 +80,12 @@ export const listFilingPeriodsTool = tool('fcc_list_filing_periods', {
       periods: sorted,
       form477Count: form477Periods.length,
       bdcCount: bdcPeriods.length,
-      hasBdcCredentials: !!(process.env.FCC_BDC_USERNAME && process.env.FCC_BDC_HASH_VALUE),
+      hasBdcCredentials,
       dataNote:
         'Form 477 data (2015–2021) is queryable via FCC Open Data without credentials. ' +
-        'BDC data (2022+) is available as bulk CSV downloads only — use fcc_list_downloads to get file manifests. ' +
+        (hasBdcCredentials
+          ? 'BDC data (2022+) is available as bulk CSV downloads only — use fcc_list_downloads to get file manifests. '
+          : 'BDC bulk downloads are unavailable in this deployment. ') +
         'There is a data gap between June 2021 (last Form 477) and June 2022 (first BDC period).',
     };
   },

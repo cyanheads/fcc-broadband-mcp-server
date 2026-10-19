@@ -82,7 +82,7 @@ export const searchAvailabilityTool = tool('fcc_search_availability', {
     dataVintage: z
       .string()
       .describe(
-        'Data vintage — all Form 477 data on FCC Open Data is as of June 2021. For newer BDC data, use fcc_list_downloads.',
+        'Data vintage — all Form 477 data on FCC Open Data is as of June 2021. BDC bulk-file manifests for newer data require a deployment with BDC credentials.',
       ),
   }),
 

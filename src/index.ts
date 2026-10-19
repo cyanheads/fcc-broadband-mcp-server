@@ -6,7 +6,8 @@
  * @module index
  */
 
-import { createApp } from '@cyanheads/mcp-ts-core';
+import { createApp, disabledTool } from '@cyanheads/mcp-ts-core';
+import { parseConfig } from '@cyanheads/mcp-ts-core/config';
 import { getServerConfig } from './config/server-config.js';
 import { allPromptDefinitions } from './mcp-server/prompts/definitions/index.js';
 import { allResourceDefinitions } from './mcp-server/resources/definitions/index.js';
@@ -18,10 +19,21 @@ import {
   initOpenDataService,
 } from './services/open-data/open-data-service.js';
 
+parseConfig();
+const serverConfig = getServerConfig();
+const hasBdcCredentials = !!(serverConfig.bdcUsername && serverConfig.bdcHashValue);
+
 await createApp({
   name: 'fcc-broadband-mcp-server',
   title: 'fcc-broadband-mcp-server',
-  tools: [...allToolDefinitions],
+  tools: allToolDefinitions.map((definition) =>
+    definition.name === 'fcc_list_downloads' && !hasBdcCredentials
+      ? disabledTool(definition, {
+          reason: 'BDC credentials are not configured in this deployment.',
+          hint: 'Set FCC_BDC_USERNAME and FCC_BDC_HASH_VALUE to enable BDC downloads.',
+        })
+      : definition,
+  ),
   resources: [...allResourceDefinitions],
   prompts: [...allPromptDefinitions],
   landing: { requireAuth: false },
@@ -52,11 +64,13 @@ await createApp({
     'FCC broadband data server providing access to Form 477 (2015–2021) and BDC (2022+) datasets.\n' +
     '- Start with fcc_geocode_block to convert coordinates to census block FIPS for address-level queries\n' +
     '- Use fcc_get_coverage_summary for equity/policy analysis at state, county, or national level\n' +
+    '- Use fcc_search_geographies to discover place and CBSA GEOIDs by name before querying coverage\n' +
     '- Use fcc_find_underserved for BEAD program eligibility and funding analysis\n' +
-    '- BDC tools (fcc_list_downloads) require FCC_BDC_USERNAME and FCC_BDC_HASH_VALUE credentials\n' +
+    (hasBdcCredentials
+      ? '- Use fcc_list_downloads for BDC bulk-file manifests (2022+)\n'
+      : '- BDC bulk downloads are unavailable in this deployment\n') +
     '- All Form 477 tools work without credentials and reflect data as of June 2021',
   setup(core) {
-    const serverConfig = getServerConfig();
     initGeoApiService(core.config, core.storage);
     initOpenDataService(core.config, core.storage, serverConfig);
     initBdcApiService(core.config, core.storage, serverConfig);

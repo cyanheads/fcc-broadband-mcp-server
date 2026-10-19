@@ -7,7 +7,12 @@
 
 import type { Context } from '@cyanheads/mcp-ts-core';
 import type { AppConfig } from '@cyanheads/mcp-ts-core/config';
-import { JsonRpcErrorCode, McpError, serviceUnavailable } from '@cyanheads/mcp-ts-core/errors';
+import {
+  JsonRpcErrorCode,
+  McpError,
+  serializationError,
+  serviceUnavailable,
+} from '@cyanheads/mcp-ts-core/errors';
 import type { StorageService } from '@cyanheads/mcp-ts-core/storage';
 import { httpErrorFromResponse, withRetry } from '@cyanheads/mcp-ts-core/utils';
 import type { ServerConfig } from '@/config/server-config.js';
@@ -18,6 +23,8 @@ import {
   type AreaSegment,
   DATASET_IDS,
   type DeploymentRecord,
+  type GeographyMatch,
+  type GeographySearchResult,
   PROVIDER_SUMMARY_ROLLUP_TECHS,
   type ProviderFootprint,
   type ProviderSearchResult,
@@ -875,10 +882,51 @@ export class OpenDataService {
   }
 
   /**
-   * Resolves a GEOID to a human-readable name via the geography lookup table.
+   * Searches distinct 2021 place/CBSA names with one-row lookahead. Always live:
+   * the optional mirror does not retain the geography lookup's year column.
    */
+  async searchGeographies(
+    options: { name: string; geographyType?: 'place' | 'cbsa'; limit: number; offset: number },
+    ctx: Context,
+  ): Promise<GeographySearchResult> {
+    const name = options.name
+      .toUpperCase()
+      .replaceAll('\\', '\\\\')
+      .replaceAll('%', '\\%')
+      .replaceAll('_', '\\_')
+      .replaceAll("'", "''");
+    const typeFilter = options.geographyType
+      ? `type='${options.geographyType}'`
+      : "type in ('place','cbsa')";
+    const rows = await this.fetchJson<RawGeographyRow>(
+      this.buildUrl(DATASET_IDS.GEOGRAPHY_LOOKUP, {
+        $select: 'type,geoid,name',
+        $where: `year='2021' AND ${typeFilter} AND contains(upper(name),'${name}')`,
+        $group: 'type,geoid,name',
+        $order: 'name,type,geoid',
+        $limit: options.limit + 1,
+        $offset: options.offset,
+      }),
+      ctx,
+    );
+    const geographies = rows.slice(0, options.limit).map((row): GeographyMatch => {
+      if ((row.type !== 'place' && row.type !== 'cbsa') || !row.geoid || !row.name) {
+        throw serializationError(
+          'FCC geography lookup returned an incomplete match; try again later.',
+        );
+      }
+      return { geography_type: row.type, geography_id: row.geoid, name: row.name };
+    });
+    return {
+      geographies,
+      ...(rows.length > options.limit && { nextOffset: options.offset + options.limit }),
+    };
+  }
+
+  /** Resolves a GEOID to a human-readable name via the geography lookup table. */
   async getGeographyName(type: string, id: string, ctx: Context): Promise<string | undefined> {
-    const geoId = type === 'nation' ? '0' : id;
+    if (type === 'nation') return 'United States';
+    const geoId = id;
 
     const fromMirror = await this.fromMirror(ctx, 'geography', (m) => m.geographyName(type, geoId));
     if (fromMirror) {

@@ -127,6 +127,19 @@ export interface RawGeographyRow {
   type?: string;
 }
 
+/** A distinct named place or CBSA in the 2021 FCC geography lookup. */
+export interface GeographyMatch {
+  geography_id: string;
+  geography_type: 'place' | 'cbsa';
+  name: string;
+}
+
+/** One bounded geography page; continuation exists only after a lookahead match. */
+export interface GeographySearchResult {
+  geographies: GeographyMatch[];
+  nextOffset?: number;
+}
+
 /** Normalized deployment record for fcc_search_availability. */
 export interface DeploymentRecord {
   blockFips: string;

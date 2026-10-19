@@ -4,7 +4,7 @@
  */
 
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
-import { createMockContext, getEnrichment } from '@cyanheads/mcp-ts-core/testing';
+import { createMockContext, getEnrichment, runToolContract } from '@cyanheads/mcp-ts-core/testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { searchAvailabilityTool } from '@/mcp-server/tools/definitions/search-availability.tool.js';
 
@@ -47,6 +47,39 @@ describe('searchAvailabilityTool', () => {
     const enrichment = getEnrichment(ctx);
     expect(enrichment.appliedFilters).toBeDefined();
     expect(enrichment.notice).toBeUndefined();
+  });
+
+  it.each([true, false])(
+    'renders all applied filters for consumer=%s through both surfaces',
+    async (consumer) => {
+      const result = await runToolContract(searchAvailabilityTool, {
+        block_fips: '530330081021016',
+        tech_filter: ['50'],
+        min_speed_down: 100,
+        consumer,
+      });
+      expect(result.isError).not.toBe(true);
+      expect(result.structuredContent).toMatchObject({
+        totalProviders: 1,
+        appliedFilters: { techFilter: ['50'], minSpeedDown: 100, consumerFilter: consumer },
+      });
+      const rendered = JSON.stringify(result.content);
+      expect(rendered).toContain('Tech filter:** 50');
+      expect(rendered).toContain('Min speed:** 100');
+      expect(rendered).toContain(consumer ? 'Consumer only' : 'Business only');
+    },
+  );
+
+  it('renders the unfiltered and empty-filtered outcomes through both surfaces', async () => {
+    const normal = await runToolContract(searchAvailabilityTool, { block_fips: '530330081021016' });
+    expect(JSON.stringify(normal.content)).toContain('Applied Filters:** none');
+    mockGetDeploymentByBlock.mockResolvedValue([]);
+    const empty = await runToolContract(searchAvailabilityTool, {
+      block_fips: '530330081021016',
+      min_speed_down: 100,
+    });
+    expect(empty.structuredContent).toMatchObject({ providers: [], totalProviders: 0 });
+    expect(JSON.stringify(empty.content)).toContain('530330081021016');
   });
 
   it('passes tech filter and min speed to service', async () => {

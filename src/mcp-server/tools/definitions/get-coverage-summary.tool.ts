@@ -59,7 +59,9 @@ export const getCoverageSummaryTool = tool('fcc_get_coverage_summary', {
     geography: z
       .object({
         type: z.string().describe('Geography type (e.g., "state").'),
-        id: z.string().describe('FIPS GEOID (e.g., "06").'),
+        id: z
+          .string()
+          .describe('FIPS GEOID (e.g., "06"), or "0" for United States national coverage.'),
         name: z.string().optional().describe('Human-readable name if available.'),
       })
       .describe('The queried geography.'),
@@ -145,7 +147,7 @@ export const getCoverageSummaryTool = tool('fcc_get_coverage_summary', {
       code: JsonRpcErrorCode.NotFound,
       when: 'No area data found for the given geography ID and type.',
       recovery:
-        'Check the FIPS code format for the geography type. State=2 digits, county=5 digits, congressional district=4 digits.',
+        'Use fcc_search_geographies to find place and CBSA GEOIDs by name. State=2 digits, county=5, congressional district=4, place=7, CBSA=5; tribal uses a BIA area ID, and nation omits geography_id.',
     },
     {
       reason: 'invalid_geography_combo',
@@ -287,12 +289,11 @@ export const getCoverageSummaryTool = tool('fcc_get_coverage_summary', {
   },
 
   format: (result) => {
-    const geoLabel = result.geography.name
-      ? `${result.geography.name} (${result.geography.type}=${result.geography.id})`
-      : `${result.geography.type} ${result.geography.id}`;
+    const geoLabel = result.geography.name ?? `${result.geography.type} ${result.geography.id}`;
 
     const lines = [
-      `## Broadband Coverage Summary — ${geoLabel}`,
+      `## ${geoLabel} — Broadband Coverage Summary`,
+      `**Geography:** ${result.geography.type}=${result.geography.id}`,
       `**Technology:** ${result.techFilter} | **Speed Threshold:** ${result.speedDownMbps} Mbps | **Data Vintage:** ${result.dataVintage}`,
       '',
       `### Population Overview`,

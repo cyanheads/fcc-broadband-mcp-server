@@ -30,7 +30,7 @@ export const geographySummaryResource = resource('fcc-broadband://geography/{typ
     geography: z
       .object({
         type: z.string().describe('Geography type.'),
-        id: z.string().describe('FIPS GEOID.'),
+        id: z.string().describe('FIPS GEOID, or "0" for United States national coverage.'),
         name: z.string().optional().describe('Human-readable name.'),
       })
       .describe('The queried geography.'),
