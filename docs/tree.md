@@ -1,6 +1,6 @@
 # fcc-broadband-mcp-server - Directory Structure
 
-Generated on: 2026-10-08 11:20:46
+Generated on: 2026-10-19 01:40:18
 
 ```text
 fcc-broadband-mcp-server/
@@ -26,6 +26,7 @@ fcc-broadband-mcp-server/
 ├── changelog/
 │   ├── 0.1.x/
 │   ├── 0.2.x/
+│   ├── 0.3.x/
 │   └── template.md
 ├── docs/
 │   ├── design.md
@@ -161,6 +162,7 @@ fcc-broadband-mcp-server/
 │   │           ├── list-downloads.tool.ts
 │   │           ├── list-filing-periods.tool.ts
 │   │           ├── search-availability.tool.ts
+│   │           ├── search-geographies.tool.ts
 │   │           └── search-providers.tool.ts
 │   ├── services/
 │   │   ├── bdc-api/
@@ -183,6 +185,7 @@ fcc-broadband-mcp-server/
 │   ├── config/
 │   │   └── server-config.test.ts
 │   ├── prompts/
+│   │   └── broadband-equity-analysis.prompt.test.ts
 │   ├── resources/
 │   │   ├── geography-summary.resource.test.ts
 │   │   └── providers-list.resource.test.ts
@@ -193,22 +196,30 @@ fcc-broadband-mcp-server/
 │   │   │   └── geo-api-service.test.ts
 │   │   ├── open-data/
 │   │   │   ├── form477-mirror.test.ts
+│   │   │   ├── geography-search.test.ts
 │   │   │   ├── mirror-helpers.test.ts
+│   │   │   ├── mirror-ingest.test.ts
 │   │   │   ├── open-data-service-shutdown.test.ts
 │   │   │   └── open-data-service.test.ts
 │   │   └── upstream-error-redaction.test.ts
-│   └── tools/
-│       ├── compare-areas.tool.test.ts
-│       ├── find-underserved.tool.test.ts
-│       ├── geocode-block.tool.test.ts
-│       ├── get-coverage-summary.tool.test.ts
-│       ├── get-provider.tool.test.ts
-│       ├── input-pipeline.test.ts
-│       ├── list-downloads.tool.test.ts
-│       ├── list-filing-periods.tool.test.ts
-│       ├── search-availability.tool.test.ts
-│       ├── search-providers.tool.test.ts
-│       └── strict-inputs.test.ts
+│   ├── tools/
+│   │   ├── bdc-deployment.test.ts
+│   │   ├── compare-areas.tool.test.ts
+│   │   ├── find-underserved.tool.test.ts
+│   │   ├── geocode-backend-contract.test.ts
+│   │   ├── geocode-block.tool.test.ts
+│   │   ├── get-coverage-summary.tool.test.ts
+│   │   ├── get-provider.tool.test.ts
+│   │   ├── input-pipeline.test.ts
+│   │   ├── list-downloads.tool.test.ts
+│   │   ├── list-filing-periods.tool.test.ts
+│   │   ├── nation-geography.test.ts
+│   │   ├── search-availability.tool.test.ts
+│   │   ├── search-geographies.tool.test.ts
+│   │   ├── search-providers.tool.test.ts
+│   │   └── strict-inputs.test.ts
+│   ├── index-env.test.ts
+│   └── index.test.ts
 ├── .dockerignore
 ├── .env.example
 ├── .gitattributes

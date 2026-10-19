@@ -2,6 +2,10 @@
 
 All notable changes to this project. Each entry links to its full per-version file in [changelog/](changelog/).
 
+## [0.3.0](changelog/0.3.x/0.3.0.md) — 2026-10-18
+
+Discover place and CBSA geographies by name, with BDC downloads advertised only where credentials are configured.
+
 ## [0.2.4](changelog/0.2.x/0.2.4.md) — 2026-10-08
 
 Adopts mcp-ts-core 0.13.6 → 0.13.14: tool arguments sent as an integer for a string ID, a numeric or boolean string, a lone string for a list, or null for an optional field are repaired instead of rejected, and every tool error result carries its request ID.
