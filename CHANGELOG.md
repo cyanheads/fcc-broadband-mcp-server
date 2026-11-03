@@ -2,6 +2,10 @@
 
 All notable changes to this project. Each entry links to its full per-version file in [changelog/](changelog/).
 
+## [0.4.0](changelog/0.4.x/0.4.0.md) — 2026-11-03
+
+Historical coverage analysis and paged results
+
 ## [0.3.0](changelog/0.3.x/0.3.0.md) — 2026-10-18
 
 Discover place and CBSA geographies by name, with BDC downloads advertised only where credentials are configured.
