@@ -5,6 +5,7 @@
 
 import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
+import { STATE_ABBR_TO_FIPS } from '@/services/open-data/mirror/state-fips.js';
 import { getOpenDataService } from '@/services/open-data/open-data-service.js';
 import { TECH_CODES } from '@/services/open-data/types.js';
 
@@ -40,6 +41,14 @@ export const searchProvidersTool = tool('fcc_search_providers', {
       .describe(
         'Technology codes to filter, from the complete Form 477 taxonomy: 0=All other, 10=Asymmetric xDSL, 11=ADSL2, 12=VDSL, 20=Symmetric xDSL, 30=Other copper wireline, 40=Cable modem, 41=Cable modem DOCSIS 1/1.1/2.0, 42=Cable modem DOCSIS 3.0, 43=Cable modem DOCSIS 3.1, 50=Fiber to the end user, 60=Satellite, 70=Terrestrial fixed wireless, 90=Electric power line. Omit for all technologies. Matches individual deployment filings like state does, so pairing this with name_search narrows to filings made under the matched name — a holding company that files some technologies under an acquired brand name can come back empty here while its techCodes list the technology. To ask what one company deploys, search the name alone and read techCodes off the result.',
       ),
+    offset: z
+      .number()
+      .int()
+      .min(0)
+      .default(0)
+      .describe(
+        'Number of sorted distinct providers to skip. Live continuation covers the sampled set only; samples may differ between calls.',
+      ),
     limit: z
       .number()
       .int()
@@ -50,6 +59,11 @@ export const searchProvidersTool = tool('fcc_search_providers', {
   }),
 
   output: z.object({
+    offset: z.number().describe('Number of sorted providers skipped.'),
+    nextOffset: z
+      .number()
+      .optional()
+      .describe('Next offset when another page remains in the computed match set.'),
     providers: z
       .array(
         z
@@ -175,6 +189,13 @@ export const searchProvidersTool = tool('fcc_search_providers', {
    */
   errors: [
     {
+      reason: 'unknown_state',
+      code: JsonRpcErrorCode.ValidationError,
+      when: 'The state input is not a USPS state or territory abbreviation.',
+      recovery:
+        'Use a USPS state or territory abbreviation such as WA or PR, or omit state to search nationwide.',
+    },
+    {
       reason: 'live_search_timeout',
       code: JsonRpcErrorCode.Timeout,
       retryable: false,
@@ -186,6 +207,12 @@ export const searchProvidersTool = tool('fcc_search_providers', {
   ],
 
   async handler(input, ctx) {
+    if (input.state !== undefined && !STATE_ABBR_TO_FIPS.has(input.state)) {
+      throw ctx.fail(
+        'unknown_state',
+        `"${input.state}" is not a USPS state or territory abbreviation.`,
+      );
+    }
     ctx.log.info('fcc_search_providers', {
       nameSearch: input.name_search,
       state: input.state,
@@ -199,6 +226,7 @@ export const searchProvidersTool = tool('fcc_search_providers', {
         ...(input.state !== undefined && { state: input.state }),
         ...(input.tech_filter?.length && { techCodes: input.tech_filter }),
         limit: input.limit,
+        offset: input.offset,
       },
       ctx,
     );
@@ -230,18 +258,29 @@ export const searchProvidersTool = tool('fcc_search_providers', {
      * routes through it too, last-wins), so compose one string and emit it once.
      */
     const notices: string[] = [];
-    const listTruncated = search.matched > input.limit;
+    const nextOffset =
+      input.offset + providers.length < search.matched
+        ? input.offset + providers.length
+        : undefined;
+    const listTruncated = nextOffset !== undefined;
     if (listTruncated) {
       notices.push(
-        `Showing ${providers.length} of the ${search.matched} providers this search found — raise limit to see more.`,
+        `Showing ${providers.length} of the ${search.matched} providers this search found. Continue with offset=${nextOffset} and the same filters.`,
       );
     }
     if (search.scanTruncated) {
       notices.push(
+        'Continuation covers only this sampled match set; the upstream sample may differ between calls.',
+      );
+      notices.push(
         `This list of providers is a sample, not the complete set: the search read the first ${search.scanRowCap.toLocaleString()} matching FCC deployment rows to see which holding companies matched, so companies whose rows fall outside that window are missing and the true match count is unknown. FCC deployment data is per census block, so a match of almost any size fills that window and no filter combination makes this result complete — a narrower name, state, or technology filter draws the window from a smaller pool and so surfaces a larger share of the matches, but only the local Form 477 mirror (FCC_MIRROR_ENABLED=true) searches every holding-company name and returns every match. What is missing is companies, not detail: each provider listed above carries its complete national states and technologies, looked up per company rather than read off that window.`,
       );
     }
-    if (providers.length === 0) {
+    if (providers.length === 0 && search.matched > 0) {
+      notices.push(
+        `This page is exhausted at offset=${input.offset}; ${search.matched} providers were found in the computed match set.`,
+      );
+    } else if (providers.length === 0) {
       const criteria = [
         input.name_search && `name="${input.name_search}"`,
         input.state && `state="${input.state}"`,
@@ -276,6 +315,8 @@ export const searchProvidersTool = tool('fcc_search_providers', {
     }
 
     return {
+      offset: input.offset,
+      ...(nextOffset !== undefined && { nextOffset }),
       providers,
       totalFound: providers.length,
       dataVintage: 'June 2021 (last Form 477 filing period)',
@@ -286,10 +327,16 @@ export const searchProvidersTool = tool('fcc_search_providers', {
     const lines = [
       `## Broadband Providers`,
       `**Data Vintage:** ${result.dataVintage} | **Returned:** ${result.totalFound}`,
+      `**Offset:** ${result.offset}`,
+      ...(result.nextOffset !== undefined ? [`**Next offset:** ${result.nextOffset}`] : []),
     ];
 
     if (result.providers.length === 0) {
-      lines.push('\nNo providers matched the search criteria.');
+      lines.push(
+        result.offset > 0
+          ? '\nThis page is exhausted.'
+          : '\nNo providers matched the search criteria.',
+      );
     } else {
       lines.push('');
       for (const p of result.providers) {

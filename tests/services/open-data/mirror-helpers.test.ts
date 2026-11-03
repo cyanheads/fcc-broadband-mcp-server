@@ -8,7 +8,32 @@
 import { describe, expect, it } from 'vitest';
 import { parseCsv } from '@/services/open-data/mirror/csv.js';
 import { ftsPrefixQuery } from '@/services/open-data/mirror/form477-mirror.js';
-import { prefixUpperBound } from '@/services/open-data/mirror/state-fips.js';
+import { prefixUpperBound, STATE_ABBR_TO_FIPS } from '@/services/open-data/mirror/state-fips.js';
+
+describe('Form 477 USPS membership', () => {
+  it('keeps the verified deployment population including every territory', () => {
+    expect([...STATE_ABBR_TO_FIPS.keys()].sort()).toEqual(
+      'AK AL AR AS AZ CA CO CT DC DE FL GA GU HI IA ID IL IN KS KY LA MA MD ME MI MN MO MP MS MT NC ND NE NH NJ NM NV NY OH OK OR PA PR RI SC SD TN TX UT VA VI VT WA WI WV WY'.split(
+        ' ',
+      ),
+    );
+    expect(['AS', 'GU', 'MP', 'PR', 'VI'].map((state) => STATE_ABBR_TO_FIPS.get(state))).toEqual([
+      '60',
+      '66',
+      '69',
+      '72',
+      '78',
+    ]);
+  });
+
+  it.each(['ZZ', 'constructor', '__proto__', 'toString', ''])(
+    'does not inherit membership for %s',
+    (state) => {
+      expect(STATE_ABBR_TO_FIPS.has(state)).toBe(false);
+      expect(STATE_ABBR_TO_FIPS.get(state)).toBeUndefined();
+    },
+  );
+});
 
 describe('parseCsv', () => {
   it('parses a quoted Socrata export page into keyed records', () => {

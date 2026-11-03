@@ -1,14 +1,15 @@
 /**
- * @fileoverview Discover 2021 place and CBSA GEOIDs by literal name fragment.
+ * @fileoverview Discover 2021 geography IDs by literal name fragment.
  * @module mcp-server/tools/definitions/search-geographies.tool
  */
 import { tool, z } from '@cyanheads/mcp-ts-core';
 import { getOpenDataService } from '@/services/open-data/open-data-service.js';
+import { GEOGRAPHY_TYPES } from '@/services/open-data/types.js';
 
 export const searchGeographiesTool = tool('fcc_search_geographies', {
   title: 'Search Geographies',
   description:
-    'Find census places and CBSAs (metro areas) by case-insensitive literal name substring in the 2021 FCC geography lookup. Keep ambiguous matches distinct and choose the geography_type and geography_id to pass to fcc_get_coverage_summary. Include a location qualifier in name to narrow results; CBSA codes do not encode state membership. Always queries live FCC Open Data, even with the Form 477 mirror enabled, and needs no BDC credentials. Follow nextOffset until absent; no total match count is computed.',
+    'Find states, counties, congressional districts (cd), census places, CBSAs (metro areas), and tribal areas by case-insensitive literal name substring in the 2021 FCC geography lookup. Keep ambiguous matches distinct and choose the geography_type and geography_id to pass to fcc_get_coverage_summary. Include a location qualifier in name to narrow results; names do not establish exhaustive state membership. Always queries live FCC Open Data, even with the Form 477 mirror enabled, and needs no BDC credentials. Follow nextOffset until absent; no total match count is computed.',
   annotations: { readOnlyHint: true, openWorldHint: false, idempotentHint: true },
   input: z.object({
     name: z
@@ -19,9 +20,11 @@ export const searchGeographiesTool = tool('fcc_search_geographies', {
         'Nonblank literal name fragment, such as "Casper, WY". Apostrophes, percent signs and underscores are literal characters.',
       ),
     geography_type: z
-      .union([z.literal(''), z.enum(['place', 'cbsa']).describe('Place or CBSA.')])
+      .union([z.literal(''), z.enum(GEOGRAPHY_TYPES).describe('Geography type to discover.')])
       .optional()
-      .describe('Limit to place or cbsa; omit or leave blank to search both.'),
+      .describe(
+        'Limit to state, county, cd, place, cbsa, or tribal; omit or leave blank to search all six.',
+      ),
     limit: z
       .number()
       .int()
@@ -42,7 +45,7 @@ export const searchGeographiesTool = tool('fcc_search_geographies', {
         z
           .object({
             geography_type: z
-              .enum(['place', 'cbsa'])
+              .enum(GEOGRAPHY_TYPES)
               .describe('Type to pass to fcc_get_coverage_summary.'),
             geography_id: z.string().describe('GEOID to pass to fcc_get_coverage_summary.'),
             name: z.string().describe('Name as recorded in the FCC lookup.'),

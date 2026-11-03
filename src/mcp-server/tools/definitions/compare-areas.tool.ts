@@ -5,6 +5,11 @@
 
 import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
+import {
+  AREA_SPEED_DESCRIPTION,
+  AREA_TECH_DESCRIPTION,
+  AREA_TECH_FILTERS,
+} from '@/services/open-data/area-filters.js';
 import { getOpenDataService } from '@/services/open-data/open-data-service.js';
 import { geoidShapeError } from '@/services/open-data/types.js';
 
@@ -84,8 +89,8 @@ export const compareAreasTool = tool('fcc_compare_areas', {
   title: 'Compare Broadband Coverage Across Areas',
   description:
     'Compares broadband coverage metrics across multiple geographies of the same type and returns a ranked table sorted by unserved or underserved population. ' +
-    'Answers "which counties in this state have the worst broadband access?" and drives BEAD funding prioritization. ' +
-    'Provide up to 50 geography IDs, or set compare_all_states=true for all 50 states + DC. ' +
+    'Compares historical population coverage gaps; it cannot establish current BEAD eligibility or address service. ' +
+    'Compares the first 300 distinct geography IDs and discloses duplicates, unmatched IDs and excluded IDs, or set compare_all_states=true for all 50 states + DC. ' +
     'Data is from FCC Form 477 (as of June 2021).',
   annotations: { readOnlyHint: true, openWorldHint: false, idempotentHint: true },
 
@@ -98,10 +103,9 @@ export const compareAreasTool = tool('fcc_compare_areas', {
     geography_ids: z
       .array(z.string())
       .min(2)
-      .max(50)
       .optional()
       .describe(
-        'Array of FIPS GEOIDs to compare (up to 50). For all 50 states, omit and set compare_all_states=true.',
+        'FIPS GEOIDs to compare. The first 300 distinct IDs are queried; remaining distinct IDs are disclosed as excluded. For all 50 states, omit and set compare_all_states=true.',
       ),
     compare_all_states: z
       .boolean()
@@ -109,27 +113,29 @@ export const compareAreasTool = tool('fcc_compare_areas', {
       .describe(
         'When true, compares all 50 states + DC. Overrides geography_ids. Requires geography_type="state".',
       ),
-    tech_filter: z
-      .enum(['acfosw', 'f', 'c', 'a', 'o', 's', 'w'])
-      .default('acfosw')
-      .describe(
-        'Technology filter, one value: "acfosw" = every technology (default). "f" = fiber, "c" = cable, "a" = ADSL/DSL, "o" = other (symmetric DSL, other copper, power line), "s" = satellite, "w" = fixed wireless.',
-      ),
+    tech_filter: z.enum(AREA_TECH_FILTERS).default('acfow').describe(AREA_TECH_DESCRIPTION),
     speed_down: z
       .enum(['0.2', '4', '10', '25', '100', '250', '1000'])
       .default('25')
-      .describe(
-        'Download speed threshold in Mbps. 25 = FCC legacy standard. 100 = BEAD program standard.',
-      ),
+      .describe(AREA_SPEED_DESCRIPTION),
     sort_by: z
       .enum(['unserved_pct', 'unserved_pop', 'coverage_pct', 'competitive_pct'])
       .default('unserved_pct')
       .describe(
-        '"unserved_pct" = share of population with no broadband (default). "unserved_pop" = raw headcount for BEAD funding. "coverage_pct" = share with any coverage. "competitive_pct" = share with 2+ providers. Every option ranks worst-first, so rank 1 is the highest unserved share or headcount, or the lowest coverage or competitive share.',
+        '"unserved_pct" = share of population with no broadband (default). "unserved_pop" = raw headcount. "coverage_pct" = share with any coverage. "competitive_pct" = share with 2+ providers. Every option ranks worst-first, so rank 1 is the highest unserved share or headcount, or the lowest coverage or competitive share.',
       ),
   }),
 
   output: z.object({
+    unmatchedIds: z
+      .array(z.string())
+      .describe('Retained geography IDs without matching Area Table data.'),
+    excludedIds: z
+      .array(z.string())
+      .describe('Distinct geography IDs beyond the first 300, which were not queried.'),
+    duplicateIds: z
+      .array(z.string())
+      .describe('IDs repeated in the input, listed once in first repeated-occurrence order.'),
     geographyType: z.string().describe('Geography type compared.'),
     techFilter: z.string().describe('Technology filter applied.'),
     speedDownMbps: z.number().describe('Speed threshold in Mbps.'),
@@ -162,6 +168,12 @@ export const compareAreasTool = tool('fcc_compare_areas', {
 
   // Agent-facing success-path context: applied filter echo.
   enrichment: {
+    notice: z
+      .string()
+      .optional()
+      .describe(
+        'Composed disclosure naming unmatched retained IDs, excluded unqueried IDs and duplicate IDs with their counts. Absent when none applies.',
+      ),
     appliedFilters: z
       .object({
         geographyType: z.string().describe('Geographic level compared.'),
@@ -225,19 +237,30 @@ export const compareAreasTool = tool('fcc_compare_areas', {
       );
     }
 
-    const geoIds = input.compare_all_states ? ALL_STATE_FIPS : (input.geography_ids ?? []);
+    const requestedIds = input.compare_all_states ? ALL_STATE_FIPS : (input.geography_ids ?? []);
 
-    if (geoIds.length < 2) {
+    if (requestedIds.length < 2) {
       throw ctx.fail(
         'missing_geography_ids',
         'Provide at least 2 geography_ids to compare, or set compare_all_states=true.',
       );
     }
 
-    for (const id of geoIds) {
+    for (const id of requestedIds) {
       const shapeError = geoidShapeError(input.geography_type, id);
       if (shapeError) throw ctx.fail('invalid_geography_id_shape', shapeError);
     }
+
+    const seen = new Set<string>();
+    const duplicates = new Set<string>();
+    for (const id of requestedIds) {
+      if (seen.has(id)) duplicates.add(id);
+      else seen.add(id);
+    }
+    const distinctIds = [...seen];
+    const geoIds = distinctIds.slice(0, 300);
+    const excludedIds = distinctIds.slice(300);
+    const duplicateIds = [...duplicates];
 
     ctx.log.info('fcc_compare_areas', {
       geographyType: input.geography_type,
@@ -246,6 +269,10 @@ export const compareAreasTool = tool('fcc_compare_areas', {
     });
 
     const service = getOpenDataService();
+    const requestCtx = {
+      ...ctx,
+      signal: AbortSignal.any([ctx.signal, AbortSignal.timeout(48_000)]),
+    };
     const stats = await service.getAreaStatsBatch(
       {
         geographyType: input.geography_type,
@@ -253,15 +280,30 @@ export const compareAreasTool = tool('fcc_compare_areas', {
         techFilter: input.tech_filter,
         speedDown: input.speed_down,
       },
-      ctx,
+      requestCtx,
     );
 
+    const matchedIds = new Set(stats.map((s) => s.id));
+    const unmatchedIds = geoIds.filter((id) => !matchedIds.has(id));
+    const disclosures = [
+      ...(unmatchedIds.length
+        ? [`Unmatched retained IDs (${unmatchedIds.length}): ${unmatchedIds.join(', ')}.`]
+        : []),
+      ...(excludedIds.length
+        ? [`Excluded unqueried IDs (${excludedIds.length}): ${excludedIds.join(', ')}.`]
+        : []),
+      ...(duplicateIds.length
+        ? [`Duplicate IDs (${duplicateIds.length}): ${duplicateIds.join(', ')}.`]
+        : []),
+    ];
     if (stats.length === 0) {
       throw ctx.fail(
         'no_data_found',
-        `No area data found for ${geoIds.length} ${input.geography_type} geography IDs`,
+        `No area data found for ${geoIds.length} ${input.geography_type} geography IDs. ${disclosures.join(' ')}`,
+        { unmatchedIds, excludedIds, duplicateIds },
       );
     }
+    if (disclosures.length) ctx.enrich.notice(disclosures.join(' '));
 
     // Compute derived metrics and sort
     const enriched = stats.map((s) => {
@@ -301,14 +343,18 @@ export const compareAreasTool = tool('fcc_compare_areas', {
       }
     });
 
-    // Resolve GEOIDs to names in one batched lookup; a resolution failure never fails the call.
+    // Optional name availability does not block data; caller cancellation still ends the call.
     const names = await service
       .getGeographyNames(
         input.geography_type,
         sorted.map((s) => s.id),
-        ctx,
+        requestCtx,
       )
-      .catch(() => new Map<string, string>());
+      .catch((error: unknown) => {
+        if (ctx.signal.aborted || (error instanceof Error && error.name === 'AbortError'))
+          throw error;
+        return new Map<string, string>();
+      });
 
     const areas = sorted.map((s, i) => {
       const name = names.get(s.id);
@@ -331,6 +377,9 @@ export const compareAreasTool = tool('fcc_compare_areas', {
     });
 
     return {
+      unmatchedIds,
+      excludedIds,
+      duplicateIds,
       geographyType: input.geography_type,
       techFilter: input.tech_filter,
       speedDownMbps: parseFloat(input.speed_down),
@@ -355,6 +404,9 @@ export const compareAreasTool = tool('fcc_compare_areas', {
       `## Broadband Coverage Comparison`,
       `**Geography Type:** ${result.geographyType} | **Tech:** ${result.techFilter} | **Speed:** ${result.speedDownMbps} Mbps | **Sorted By:** ${sortedBy}`,
       `**Data Vintage:** ${result.dataVintage} | **Areas Compared:** ${result.totalAreas}`,
+      `**Unmatched IDs:** ${result.unmatchedIds.join(', ') || 'none'}`,
+      `**Excluded IDs:** ${result.excludedIds.join(', ') || 'none'}`,
+      `**Duplicate IDs:** ${result.duplicateIds.join(', ') || 'none'}`,
       '',
       `| Rank | Name (GEOID) | Total Pop | No Coverage | 1 Provider | 2 Providers | 3+ Providers | Unserved% | Coverage% | Competitive% |`,
       `|:-----|:-------------|:----------|:------------|:-----------|:------------|:-------------|:----------|:----------|:-------------|`,

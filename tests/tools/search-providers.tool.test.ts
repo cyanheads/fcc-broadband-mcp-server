@@ -35,6 +35,30 @@ function sampledScan(providers: ProviderRecord[] = MOCK_PROVIDERS): ProviderSear
 }
 
 describe('searchProvidersTool', () => {
+  it('rejects unknown states with recovery on both surfaces before service I/O', async () => {
+    const result = await runToolContract(searchProvidersTool, { state: 'ZZ' });
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toMatchObject({
+      error: { code: JsonRpcErrorCode.ValidationError, data: { reason: 'unknown_state' } },
+    });
+    expect(JSON.stringify(result.content)).toContain('USPS');
+    expect(mockSearchProviders).not.toHaveBeenCalled();
+  });
+
+  it('forwards offset and renders continuation and exhausted pages', async () => {
+    mockSearchProviders.mockResolvedValue({ ...completeScan(), matched: 3 });
+    const result = await runToolContract(searchProvidersTool, { offset: 1, limit: 1 });
+    expect(result.structuredContent).toMatchObject({ offset: 1, nextOffset: 2 });
+    expect(JSON.stringify(result.content)).toContain('Next offset');
+    expect(mockSearchProviders).toHaveBeenCalledWith(
+      expect.objectContaining({ offset: 1 }),
+      expect.anything(),
+    );
+    mockSearchProviders.mockResolvedValue({ ...completeScan([]), matched: 3 });
+    const end = await runToolContract(searchProvidersTool, { offset: 3 });
+    expect(JSON.stringify(end.content)).toContain('exhausted');
+    expect(JSON.stringify(end.content)).not.toContain('No providers matched');
+  });
   it.each([false, true])('renders provider search filters when populated=%s', async (filtered) => {
     mockSearchProviders.mockResolvedValue({ providers: MOCK_PROVIDERS, matched: 1 });
     const result = await runToolContract(
@@ -52,6 +76,34 @@ describe('searchProvidersTool', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockSearchProviders.mockResolvedValue(completeScan());
+  });
+
+  it.each(['AS', 'GU', 'MP', 'PR', 'VI'])(
+    'accepts territory %s without narrowing its national footprint',
+    async (state) => {
+      const result = await runToolContract(searchProvidersTool, { state });
+      expect(result.isError).not.toBe(true);
+      expect(mockSearchProviders).toHaveBeenCalledWith(
+        expect.objectContaining({ state }),
+        expect.anything(),
+      );
+      expect(result.structuredContent).toMatchObject({
+        providers: [{ statesServed: ['WA', 'CA'] }],
+      });
+      expect(JSON.stringify(result.content)).toContain('WA, CA');
+    },
+  );
+
+  it.each([-1, 0.5])('rejects invalid offset %s before the service', async (offset) => {
+    const result = await runToolContract(searchProvidersTool, { offset });
+    expect(result.isError).toBe(true);
+    expect(mockSearchProviders).not.toHaveBeenCalled();
+  });
+
+  it('preserves blank-state rejection', async () => {
+    const result = await runToolContract(searchProvidersTool, { state: '' });
+    expect(result.isError).toBe(true);
+    expect(mockSearchProviders).not.toHaveBeenCalled();
   });
 
   it('returns providers for a name search', async () => {
@@ -257,6 +309,7 @@ describe('searchProvidersTool', () => {
 
   it('formats output with hoconum and provider names', () => {
     const output = {
+      offset: 0,
       providers: MOCK_PROVIDERS,
       totalFound: 1,
       dataVintage: 'June 2021 (last Form 477 filing period)',
@@ -294,6 +347,7 @@ describe('searchProvidersTool', () => {
   it('formats empty provider list with fallback text', () => {
     const output = {
       providers: [],
+      offset: 0,
       totalFound: 0,
       dataVintage: 'June 2021 (last Form 477 filing period)',
     };

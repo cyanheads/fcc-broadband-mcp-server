@@ -17,12 +17,13 @@ import type { StorageService } from '@cyanheads/mcp-ts-core/storage';
 import { httpErrorFromResponse, withRetry } from '@cyanheads/mcp-ts-core/utils';
 import type { ServerConfig } from '@/config/server-config.js';
 import { Form477Mirror } from './mirror/form477-mirror.js';
-import { MAX_SCAN_ROWS } from './mirror/stores.js';
+import { MAX_PROVIDER_SEARCH_ROWS, MAX_SCAN_ROWS } from './mirror/stores.js';
 import {
   type AreaScanResult,
   type AreaSegment,
   DATASET_IDS,
   type DeploymentRecord,
+  GEOGRAPHY_TYPES,
   type GeographyMatch,
   type GeographySearchResult,
   PROVIDER_SUMMARY_ROLLUP_TECHS,
@@ -218,7 +219,7 @@ export class OpenDataService {
    * Run one mirror read. `undefined` — mirror disabled, coverage gate declined,
    * or the mirror layer failed — means the caller serves live; any other value
    * (including `null`) is authoritative. A mirror failure must degrade to the
-   * live API, never fail the tool, so errors are logged and swallowed here.
+   * live API unless cancellation has ended the request.
    */
   private async fromMirror<T>(
     ctx: Context,
@@ -233,6 +234,8 @@ export class OpenDataService {
       }
       return result;
     } catch (error) {
+      if (ctx.signal.aborted || (error instanceof Error && error.name === 'AbortError'))
+        throw error;
       ctx.log.warning('Form 477 mirror read failed — serving live', {
         dataset,
         error: error instanceof Error ? error.message : String(error),
@@ -508,7 +511,8 @@ export class OpenDataService {
   }
 
   /**
-   * Fetches area table rows for multiple geography IDs and returns raw aggregated stats.
+   * Aggregates every segment in sequential batches of at most 50 geography
+   * IDs, sharing one 48 second deadline across all batches and retries.
    */
   async getAreaStatsBatch(
     options: {
@@ -531,25 +535,34 @@ export class OpenDataService {
       total: number;
     }>
   > {
-    let rows = await this.fromMirror(ctx, 'area', (m) => m.areaStatsBatch(options));
-    if (!rows) {
-      const idList = options.geographyIds.map((id) => `'${id}'`).join(',');
-      const conditions: string[] = [
-        `type='${options.geographyType}'`,
-        `id IN (${idList})`,
-        `tech='${options.techFilter}'`,
-        `speed='${options.speedDown}'`,
-      ];
-
-      rows = await this.fetchAllPages<RawAreaRow>(
-        DATASET_IDS.AREA_TABLE,
-        {
-          $where: conditions.join(' AND '),
-          $limit: DEFAULT_LIMIT,
-        },
-        ctx,
-        MAX_LIMIT,
+    ctx = { ...ctx, signal: AbortSignal.any([ctx.signal, AbortSignal.timeout(48_000)]) };
+    const rows: RawAreaRow[] = [];
+    for (let offset = 0; offset < options.geographyIds.length; offset += 50) {
+      ctx.signal.throwIfAborted();
+      const geographyIds = options.geographyIds.slice(offset, offset + 50);
+      let batch = await this.fromMirror(ctx, 'area', (m) =>
+        m.areaStatsBatch({ ...options, geographyIds }),
       );
+      if (!batch) {
+        const idList = geographyIds.map((id) => `'${id}'`).join(',');
+        const conditions: string[] = [
+          `type='${options.geographyType}'`,
+          `id IN (${idList})`,
+          `tech='${options.techFilter}'`,
+          `speed='${options.speedDown}'`,
+        ];
+
+        batch = await this.fetchAllPages<RawAreaRow>(
+          DATASET_IDS.AREA_TABLE,
+          {
+            $where: conditions.join(' AND '),
+            $limit: DEFAULT_LIMIT,
+          },
+          ctx,
+          MAX_LIMIT,
+        );
+      }
+      rows.push(...batch);
     }
 
     const byId = accumulateAreaRows(rows);
@@ -577,6 +590,7 @@ export class OpenDataService {
     },
     ctx: Context,
   ): Promise<AreaScanResult> {
+    ctx = { ...ctx, signal: AbortSignal.any([ctx.signal, AbortSignal.timeout(48_000)]) };
     const mirrored = await this.fromMirror(ctx, 'area', (m) =>
       m.areaStatsByType({ ...options, maxRows: MAX_AREA_SCAN_ROWS }),
     );
@@ -718,84 +732,92 @@ export class OpenDataService {
       state?: string;
       techCodes?: string[];
       limit?: number;
+      offset?: number;
     },
     ctx: Context,
   ): Promise<ProviderSearchResult> {
-    const baseLimit = Math.min(options.limit ?? 50, 200);
-    const mirrorRowLimit = baseLimit * 10;
+    const callerSignal = ctx.signal;
+    const budget = AbortSignal.timeout(TIMEOUT_MS);
+    ctx = { ...ctx, signal: AbortSignal.any([callerSignal, budget]) };
+    try {
+      const scanRowCap = PROVIDER_SEARCH_SCAN_ROWS;
+      let rows = await this.fromMirror(ctx, 'provider-dimension', (m) =>
+        m.searchProviders({ ...options, rowLimit: MAX_PROVIDER_SEARCH_ROWS, signal: ctx.signal }),
+      );
+      const mirrored = rows !== undefined;
+      if (!rows) {
+        const conditions: string[] = [];
+        if (options.nameSearch) {
+          const escaped = options.nameSearch.replace(/'/g, "''");
+          conditions.push(`upper(holdingcompanyname) LIKE upper('%${escaped}%')`);
+        }
+        if (options.state) {
+          conditions.push(`stateabbr='${options.state}'`);
+        }
+        if (options.techCodes?.length) {
+          const techList = options.techCodes.map((t) => `'${t}'`).join(',');
+          conditions.push(`techcode IN (${techList})`);
+        }
 
-    let scanRowCap = mirrorRowLimit;
-    let rows = await this.fromMirror(ctx, 'provider-dimension', (m) =>
-      m.searchProviders({ ...options, rowLimit: mirrorRowLimit }),
-    );
-    if (!rows) {
-      scanRowCap = PROVIDER_SEARCH_SCAN_ROWS;
-      const conditions: string[] = [];
-      if (options.nameSearch) {
-        const escaped = options.nameSearch.replace(/'/g, "''");
-        conditions.push(`upper(holdingcompanyname) LIKE upper('%${escaped}%')`);
-      }
-      if (options.state) {
-        conditions.push(`stateabbr='${options.state}'`);
-      }
-      if (options.techCodes?.length) {
-        const techList = options.techCodes.map((t) => `'${t}'`).join(',');
-        conditions.push(`techcode IN (${techList})`);
+        // Identity only: the state and technology columns are filtered on but not
+        // selected, since the footprint pass supersedes anything read off them.
+        const url = this.buildUrl(DATASET_IDS.DEPLOYMENT, {
+          $select: 'hoconum,holdingcompanyname',
+          ...(conditions.length > 0 ? { $where: conditions.join(' AND ') } : {}),
+          $limit: PROVIDER_SEARCH_SCAN_ROWS,
+        });
+
+        rows = await this.fetchJson<RawProviderRow>(url, ctx, {
+          timeoutError: searchTimeoutError,
+        });
       }
 
-      // Identity only: the state and technology columns are filtered on but not
-      // selected, since the footprint pass supersedes anything read off them.
-      const url = this.buildUrl(DATASET_IDS.DEPLOYMENT, {
-        $select: 'hoconum,holdingcompanyname',
-        ...(conditions.length > 0 ? { $where: conditions.join(' AND ') } : {}),
-        $limit: PROVIDER_SEARCH_SCAN_ROWS,
-      });
+      /*
+       * The window is read for identity alone — which holding companies match —
+       * so only the first name seen for a hoconum is kept. Whichever row that is,
+       * it satisfied the search's own `$where`, which is what makes it the right
+       * name to show against a name search.
+       */
+      const byHoconum = new Map<string, string>();
+      for (const r of rows) {
+        const hoc = r.hoconum ?? '';
+        if (!hoc || byHoconum.has(hoc)) continue;
+        byHoconum.set(hoc, r.holdingcompanyname ?? '');
+      }
 
-      rows = await this.fetchJson<RawProviderRow>(url, ctx, {
-        timeoutError: searchTimeoutError,
-      });
+      const matches = Array.from(byHoconum, ([hoconum, holdingCompanyName]) => ({
+        hoconum,
+        holdingCompanyName,
+      }));
+      matches.sort((a, b) => a.hoconum.localeCompare(b.hoconum));
+      const offset = options.offset ?? 0;
+      const page = matches.slice(offset, offset + (options.limit ?? 50));
+      const footprints = await this.providerFootprints(
+        page.map((e) => e.hoconum),
+        ctx,
+      );
+
+      return {
+        matched: matches.length,
+        providers: page.map((entry) => {
+          // A hoconum with no deployment rows has an empty footprint, which is
+          // what an absent map entry means and what the live path returns for it.
+          const footprint = footprints.get(entry.hoconum);
+          return {
+            hoconum: entry.hoconum,
+            holdingCompanyName: entry.holdingCompanyName,
+            statesServed: footprint?.states ?? [],
+            techCodes: footprint?.techs ?? [],
+          };
+        }),
+        scanRowCap,
+        // A short read is the end of the match; a full one only proves the window filled.
+        scanTruncated: !mirrored && rows.length >= scanRowCap,
+      };
+    } catch (error) {
+      if (budget.aborted && !callerSignal.aborted) throw searchTimeoutError();
+      throw error;
     }
-
-    /*
-     * The window is read for identity alone — which holding companies match —
-     * so only the first name seen for a hoconum is kept. Whichever row that is,
-     * it satisfied the search's own `$where`, which is what makes it the right
-     * name to show against a name search.
-     */
-    const byHoconum = new Map<string, string>();
-    for (const r of rows) {
-      const hoc = r.hoconum ?? '';
-      if (!hoc || byHoconum.has(hoc)) continue;
-      byHoconum.set(hoc, r.holdingcompanyname ?? '');
-    }
-
-    const matches = Array.from(byHoconum, ([hoconum, holdingCompanyName]) => ({
-      hoconum,
-      holdingCompanyName,
-    }));
-    const page = matches.slice(0, options.limit ?? 50);
-    const footprints = await this.providerFootprints(
-      page.map((e) => e.hoconum),
-      ctx,
-    );
-
-    return {
-      matched: matches.length,
-      providers: page.map((entry) => {
-        // A hoconum with no deployment rows has an empty footprint, which is
-        // what an absent map entry means and what the live path returns for it.
-        const footprint = footprints.get(entry.hoconum);
-        return {
-          hoconum: entry.hoconum,
-          holdingCompanyName: entry.holdingCompanyName,
-          statesServed: footprint?.states ?? [],
-          techCodes: footprint?.techs ?? [],
-        };
-      }),
-      scanRowCap,
-      // A short read is the end of the match; a full one only proves the window filled.
-      scanTruncated: rows.length >= scanRowCap,
-    };
   }
 
   /**
@@ -882,11 +904,16 @@ export class OpenDataService {
   }
 
   /**
-   * Searches distinct 2021 place/CBSA names with one-row lookahead. Always live:
+   * Searches distinct 2021 geography names with one-row lookahead. Always live:
    * the optional mirror does not retain the geography lookup's year column.
    */
   async searchGeographies(
-    options: { name: string; geographyType?: 'place' | 'cbsa'; limit: number; offset: number },
+    options: {
+      name: string;
+      geographyType?: GeographyMatch['geography_type'];
+      limit: number;
+      offset: number;
+    },
     ctx: Context,
   ): Promise<GeographySearchResult> {
     const name = options.name
@@ -897,7 +924,7 @@ export class OpenDataService {
       .replaceAll("'", "''");
     const typeFilter = options.geographyType
       ? `type='${options.geographyType}'`
-      : "type in ('place','cbsa')";
+      : `type in (${GEOGRAPHY_TYPES.map((type) => `'${type}'`).join(',')})`;
     const rows = await this.fetchJson<RawGeographyRow>(
       this.buildUrl(DATASET_IDS.GEOGRAPHY_LOOKUP, {
         $select: 'type,geoid,name',
@@ -910,12 +937,13 @@ export class OpenDataService {
       ctx,
     );
     const geographies = rows.slice(0, options.limit).map((row): GeographyMatch => {
-      if ((row.type !== 'place' && row.type !== 'cbsa') || !row.geoid || !row.name) {
+      const type = GEOGRAPHY_TYPES.find((type) => type === row.type);
+      if (!type || !row.geoid || !row.name) {
         throw serializationError(
           'FCC geography lookup returned an incomplete match; try again later.',
         );
       }
-      return { geography_type: row.type, geography_id: row.geoid, name: row.name };
+      return { geography_type: type, geography_id: row.geoid, name: row.name };
     });
     return {
       geographies,
@@ -923,18 +951,14 @@ export class OpenDataService {
     };
   }
 
-  /** Resolves a GEOID to a human-readable name via the geography lookup table. */
+  /** Resolves a GEOID through the live 2021 lookup; the yearless mirror cannot supply names. */
   async getGeographyName(type: string, id: string, ctx: Context): Promise<string | undefined> {
     if (type === 'nation') return 'United States';
+    ctx = { ...ctx, signal: AbortSignal.any([ctx.signal, AbortSignal.timeout(TIMEOUT_MS)]) };
     const geoId = id;
 
-    const fromMirror = await this.fromMirror(ctx, 'geography', (m) => m.geographyName(type, geoId));
-    if (fromMirror) {
-      return fromMirror.value;
-    }
-
     const url = this.buildUrl(DATASET_IDS.GEOGRAPHY_LOOKUP, {
-      $where: `geoid='${geoId}' AND type='${type}'`,
+      $where: `year='2021' AND geoid='${geoId}' AND type='${type}'`,
       $select: 'geoid,type,name',
       $limit: 1,
     });
@@ -944,36 +968,37 @@ export class OpenDataService {
   }
 
   /**
-   * Resolves multiple GEOIDs to human-readable names in a single query against
-   * the geography lookup table, using the same `id IN (...)` batching pattern
-   * as getAreaStatsBatch. Returns a GEOID → name map; IDs without a lookup
-   * match are simply absent from the map.
+   * Resolves GEOIDs through the live 2021 lookup in sequential batches of at
+   * most 50 IDs, sharing a 30 second deadline across batches and retries.
+   * IDs without a lookup match are absent from the returned map.
    */
   async getGeographyNames(type: string, ids: string[], ctx: Context): Promise<Map<string, string>> {
     if (ids.length === 0) {
       return new Map();
     }
 
-    const fromMirror = await this.fromMirror(ctx, 'geography', (m) => m.geographyNames(type, ids));
-    if (fromMirror) {
-      return fromMirror;
-    }
-
-    const idList = ids.map((id) => `'${id}'`).join(',');
-    const rows = await this.fetchAllPages<RawGeographyRow>(
-      DATASET_IDS.GEOGRAPHY_LOOKUP,
-      {
-        $where: `type='${type}' AND geoid IN (${idList})`,
-        $select: 'geoid,type,name',
-        $limit: DEFAULT_LIMIT,
-      },
-      ctx,
-    );
-
+    ctx = { ...ctx, signal: AbortSignal.any([ctx.signal, AbortSignal.timeout(TIMEOUT_MS)]) };
     const names = new Map<string, string>();
-    for (const r of rows) {
-      if (r.geoid && r.name) {
-        names.set(r.geoid, r.name);
+    for (let offset = 0; offset < ids.length; offset += 50) {
+      ctx.signal.throwIfAborted();
+      const idList = ids
+        .slice(offset, offset + 50)
+        .map((id) => `'${id}'`)
+        .join(',');
+      const rows = await this.fetchAllPages<RawGeographyRow>(
+        DATASET_IDS.GEOGRAPHY_LOOKUP,
+        {
+          $where: `year='2021' AND type='${type}' AND geoid IN (${idList})`,
+          $select: 'geoid,type,name',
+          $limit: DEFAULT_LIMIT,
+        },
+        ctx,
+      );
+
+      for (const r of rows) {
+        if (r.geoid && r.name) {
+          names.set(r.geoid, r.name);
+        }
       }
     }
     return names;

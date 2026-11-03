@@ -89,7 +89,9 @@ describe('fcc_search_geographies', () => {
     expect(params.get('$limit')).toBe('21');
     expect(params.get('$offset')).toBe('0');
     expect(params.get('$where')).toContain("contains(upper(name),'CASPER')");
-    expect(params.get('$where')).toContain("type in ('place','cbsa')");
+    expect(params.get('$where')).toContain(
+      "type in ('state','county','cd','place','cbsa','tribal')",
+    );
   });
 
   it.each([
@@ -101,7 +103,7 @@ describe('fcc_search_geographies', () => {
     { name: 'a', limit: 0 },
     { name: 'a', offset: -1 },
     { name: 'a', offset: 0.5 },
-    { name: 'a', geography_type: 'state' },
+    { name: 'a', geography_type: 'nation' },
   ])('rejects invalid input %j before network access', async (input) => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
@@ -129,6 +131,120 @@ describe('fcc_search_geographies', () => {
     expect(result.structuredContent).toMatchObject({ error: { code: JsonRpcErrorCode.Forbidden } });
     expect(JSON.stringify(result.content)).toContain('FCC Open Data');
     expect(JSON.stringify(result)).not.toContain('private-test-token');
+  });
+
+  it.each([
+    ['state', '11', 'District of Columbia'],
+    ['county', '11001', 'District of Columbia, DC'],
+    ['cd', '1100', 'Congressional District (at Large), DC'],
+    ['place', '5613150', 'Casper, WY'],
+    ['cbsa', '16220', 'Casper, WY'],
+    ['tribal', '2430R', 'Navajo Nation Reservation'],
+  ] as const)('discovers %s names on both surfaces', async (type, id, name) => {
+    const fetchMock = vi.fn().mockResolvedValue(Response.json([{ type, geoid: id, name }]));
+    vi.stubGlobal('fetch', fetchMock);
+    const result = await runToolContract(searchGeographiesTool, {
+      name,
+      geography_type: type,
+    });
+    expect(result.isError).toBeFalsy();
+    expect(result.structuredContent).toMatchObject({
+      geographies: [{ geography_type: type, geography_id: id, name }],
+      count: 1,
+    });
+    for (const value of [type, id, name]) expect(JSON.stringify(result.content)).toContain(value);
+    expect(new URL(fetchMock.mock.calls[0]![0]).searchParams.get('$where')).toContain(
+      `type='${type}'`,
+    );
+  });
+
+  it('walks mixed-type pages through final and past-end results on both surfaces', async () => {
+    const matches = [
+      { type: 'cbsa', geoid: '11111', name: 'Shared' },
+      { type: 'cd', geoid: '1100', name: 'Shared' },
+      { type: 'county', geoid: '11001', name: 'Shared' },
+      { type: 'place', geoid: '5613150', name: 'Shared' },
+      { type: 'state', geoid: '11', name: 'Shared' },
+      { type: 'tribal', geoid: '2430T', name: 'Shared' },
+    ];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string) => {
+        const params = new URL(url).searchParams;
+        const offset = Number(params.get('$offset'));
+        return Promise.resolve(
+          Response.json(matches.slice(offset, offset + Number(params.get('$limit')))),
+        );
+      }),
+    );
+    for (const offset of [0, 2, 4, 6]) {
+      const result = await runToolContract(searchGeographiesTool, {
+        name: 'Shared',
+        limit: 2,
+        offset,
+      });
+      expect(result.isError).toBeFalsy();
+      const expected = matches.slice(offset, offset + 2).map(({ type, geoid, name }) => ({
+        geography_type: type,
+        geography_id: geoid,
+        name,
+      }));
+      expect(result.structuredContent).toMatchObject({
+        geographies: expected,
+        count: expected.length,
+        offset,
+      });
+      if (offset < 4) expect(result.structuredContent).toHaveProperty('nextOffset', offset + 2);
+      else expect(result.structuredContent).not.toHaveProperty('nextOffset');
+      for (const match of expected) {
+        expect(JSON.stringify(result.content)).toContain(match.geography_id);
+        expect(JSON.stringify(result.content)).toContain(`geography_type=${match.geography_type}`);
+      }
+    }
+  });
+
+  it('chains both opaque Navajo IDs into coverage unchanged', async () => {
+    const tribal = [
+      { type: 'tribal', geoid: '2430T', name: 'Navajo Nation Off-Reservation Trust Land' },
+      { type: 'tribal', geoid: '2430R', name: 'Navajo Nation Reservation' },
+    ];
+    const fetchMock = vi.fn((url: string) => {
+      if (new URL(url).pathname.includes('v5vt-e7vw'))
+        return Promise.resolve(Response.json(tribal));
+      return Promise.resolve(
+        Response.json([{ has_0: '1', has_1: '2', has_2: '3', has_3more: '4' }]),
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const result = await runToolContract(searchGeographiesTool, {
+      name: 'Navajo',
+      geography_type: 'tribal',
+    });
+    expect(result.isError).toBeFalsy();
+    const matches = searchGeographiesTool.output.parse(result.structuredContent).geographies;
+    expect(matches.map((match) => match.geography_id)).toEqual(['2430T', '2430R']);
+    for (const match of matches) {
+      expect(JSON.stringify(result.content)).toContain(match.geography_id);
+      const coverage = await runToolContract(getCoverageSummaryTool, {
+        geography_type: match.geography_type,
+        geography_id: match.geography_id,
+      });
+      expect(coverage.isError).toBeFalsy();
+      expect(coverage.structuredContent).toMatchObject({
+        geography: { type: 'tribal', id: match.geography_id },
+      });
+      expect(JSON.stringify(coverage.content)).toContain(match.geography_id);
+    }
+    const areaWheres = fetchMock.mock.calls
+      .map(([url]) => new URL(url))
+      .filter((url) => url.pathname.includes('xvwq-qtaj'))
+      .map((url) => url.searchParams.get('$where'));
+    expect(areaWheres).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("id='2430T'"),
+        expect.stringContaining("id='2430R'"),
+      ]),
+    );
   });
 
   it('chains the distinct Casper place and CBSA to coverage without changing GEOIDs', async () => {

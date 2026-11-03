@@ -5,6 +5,11 @@
 
 import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
+import {
+  AREA_SPEED_DESCRIPTION,
+  AREA_TECH_DESCRIPTION,
+  AREA_TECH_FILTERS,
+} from '@/services/open-data/area-filters.js';
 import { getOpenDataService } from '@/services/open-data/open-data-service.js';
 import { geoidShapeError } from '@/services/open-data/types.js';
 
@@ -14,7 +19,7 @@ export const getCoverageSummaryTool = tool('fcc_get_coverage_summary', {
     'Returns a broadband coverage summary for a geography — population with zero, one, two, or three-plus providers at a given speed threshold, split by urban/rural and tribal/non-tribal segments. ' +
     'The primary tool for digital divide and equity analysis. ' +
     'Supports state, county, congressional district, census place, CBSA (metro area), tribal area, and national level. ' +
-    'Data is from FCC Form 477 (as of June 2021). Use 100 Mbps as the speed threshold for BEAD program policy analysis.',
+    'Data is from FCC Form 477 (as of June 2021), for historical population screening; it cannot establish current BEAD eligibility or address service.',
   annotations: { readOnlyHint: true, openWorldHint: false, idempotentHint: true },
 
   input: z.object({
@@ -29,23 +34,16 @@ export const getCoverageSummaryTool = tool('fcc_get_coverage_summary', {
       .describe(
         'FIPS GEOID for the geography. State: 2-digit (e.g., "06" for California). County: 5-digit (e.g., "06037" for LA County). Congressional district: 4-digit state+district (e.g., "0601"). CBSA: 5-digit code. Place: 7-digit state+place (e.g., "0644000"). Omit for nation-level queries.',
       ),
-    tech_filter: z
-      .enum(['acfosw', 'f', 'c', 'a', 'o', 's', 'w'])
-      .default('acfosw')
-      .describe(
-        'Technology filter, one value: "acfosw" = every technology (default, the recommended baseline). "f" = fiber, "c" = cable, "a" = ADSL/DSL, "o" = other (symmetric DSL, other copper, power line), "s" = satellite, "w" = fixed wireless.',
-      ),
+    tech_filter: z.enum(AREA_TECH_FILTERS).default('acfow').describe(AREA_TECH_DESCRIPTION),
     speed_down: z
       .enum(['0.2', '4', '10', '25', '100', '250', '1000'])
       .default('25')
-      .describe(
-        'Minimum download speed threshold in Mbps. 25 = FCC legacy broadband definition. 100 = BEAD program standard (use this for current policy analysis). "0.2" = any service above 200 Kbps.',
-      ),
+      .describe(AREA_SPEED_DESCRIPTION),
     urban_rural_filter: z
       .enum(['all', 'R', 'U'])
       .default('all')
       .describe(
-        'Filter to urban ("U") or rural ("R") areas only, or "all" for both combined. Rural breakdown is key for BEAD program analysis.',
+        'Filter to urban ("U") or rural ("R") areas only, or "all" for both combined. An empty segment in a confirmed geography returns zero population with a notice.',
       ),
     tribal_filter: z
       .enum(['all', 'T', 'N'])
@@ -83,7 +81,11 @@ export const getCoverageSummaryTool = tool('fcc_get_coverage_summary', {
     coveragePct: z
       .number()
       .describe('Percentage of population with at least one provider at the given speed.'),
-    unservedPct: z.number().describe('Percentage with zero providers — FCC "unserved" definition.'),
+    unservedPct: z
+      .number()
+      .describe(
+        'Percentage with zero providers in the selected historical technology and speed view.',
+      ),
     competitivePct: z.number().describe('Percentage with two or more providers.'),
     breakdown: z
       .array(
@@ -114,6 +116,12 @@ export const getCoverageSummaryTool = tool('fcc_get_coverage_summary', {
   // Agent-facing success-path context: applied filter echo.
   // Reaches both structuredContent and content[] trailer without a format() entry.
   enrichment: {
+    notice: z
+      .string()
+      .optional()
+      .describe(
+        'Explains an empty requested population segment after confirming geography rows exist.',
+      ),
     appliedFilters: z
       .object({
         geographyType: z.string().describe('Geographic aggregation level queried.'),
@@ -143,11 +151,18 @@ export const getCoverageSummaryTool = tool('fcc_get_coverage_summary', {
 
   errors: [
     {
+      reason: 'coverage_timeout',
+      code: JsonRpcErrorCode.Timeout,
+      when: 'Required coverage reads exceed the shared 48 second deadline.',
+      recovery: 'Narrow the geography or retry later when FCC Open Data is available.',
+      retryable: true,
+    },
+    {
       reason: 'geography_not_found',
       code: JsonRpcErrorCode.NotFound,
-      when: 'No area data found for the given geography ID and type.',
+      when: 'No Area Table rows exist for the geography at the requested technology and speed, including the unfiltered confirmation of an empty demographic selection.',
       recovery:
-        'Use fcc_search_geographies to find place and CBSA GEOIDs by name. State=2 digits, county=5, congressional district=4, place=7, CBSA=5; tribal uses a BIA area ID, and nation omits geography_id.',
+        'Use fcc_search_geographies with type state, county, cd, place, cbsa, or tribal to discover GEOIDs by name. State=2 digits, county=5, congressional district=4, place=7, CBSA=5; tribal uses a BIA area ID, and nation omits geography_id.',
     },
     {
       reason: 'invalid_geography_combo',
@@ -190,102 +205,149 @@ export const getCoverageSummaryTool = tool('fcc_get_coverage_summary', {
     });
 
     const service = getOpenDataService();
-    const [segments, geoName] = await Promise.all([
-      service.getAreaSegments(
-        {
+    const deadline = new AbortController();
+    const timer = setTimeout(
+      () =>
+        deadline.abort(
+          ctx.fail(
+            'coverage_timeout',
+            'FCC coverage reads exceeded their shared 48 second deadline.',
+          ),
+        ),
+      48_000,
+    );
+    const requestCtx = { ...ctx, signal: AbortSignal.any([ctx.signal, deadline.signal]) };
+    const areaQuery = {
+      geographyType: input.geography_type,
+      ...(input.geography_id !== undefined && { geographyId: input.geography_id }),
+      techFilter: input.tech_filter,
+      speedDown: input.speed_down,
+    };
+    try {
+      const [{ segments, confirmedEmptySegment }, geoName] = await Promise.all([
+        service
+          .getAreaSegments(
+            {
+              ...areaQuery,
+              urbanRuralFilter: input.urban_rural_filter,
+              tribalFilter: input.tribal_filter,
+            },
+            requestCtx,
+          )
+          .then(async (segments) => {
+            if (
+              segments.length > 0 ||
+              (input.urban_rural_filter === 'all' && input.tribal_filter === 'all')
+            ) {
+              return { segments, confirmedEmptySegment: false };
+            }
+            const unfiltered = await service.getAreaSegments(areaQuery, requestCtx);
+            return { segments, confirmedEmptySegment: unfiltered.length > 0 };
+          }),
+        service
+          .getGeographyName(input.geography_type, input.geography_id ?? '0', requestCtx)
+          .catch((error: unknown) => {
+            if (
+              ctx.signal.aborted ||
+              (!deadline.signal.aborted && error instanceof Error && error.name === 'AbortError')
+            )
+              throw error;
+            return;
+          }),
+      ]);
+
+      const geographyId = input.geography_type === 'nation' ? '0' : (input.geography_id ?? '');
+
+      if (segments.length === 0 && !confirmedEmptySegment) {
+        throw ctx.fail(
+          'geography_not_found',
+          `No area data found for geography type="${input.geography_type}", id="${geographyId}". Check the FIPS code format or try a different geography type.`,
+        );
+      }
+      if (confirmedEmptySegment) {
+        ctx.enrich.notice(
+          `No population rows match urban_rural_filter="${input.urban_rural_filter}" and tribal_filter="${input.tribal_filter}" in this geography at tech_filter="${input.tech_filter}" and speed_down="${input.speed_down}". Unfiltered geography rows were confirmed; the requested segment has zero population and an empty breakdown.`,
+        );
+      }
+
+      // Aggregate totals across all segments
+      let totalNoCoverage = 0;
+      let totalOne = 0;
+      let totalTwo = 0;
+      let totalThreePlus = 0;
+      let totalPop = 0;
+
+      for (const seg of segments) {
+        totalNoCoverage += seg.population.noCoverage;
+        totalOne += seg.population.oneProvider;
+        totalTwo += seg.population.twoProviders;
+        totalThreePlus += seg.population.threeOrMore;
+        totalPop += seg.population.total;
+      }
+
+      const coveragePct = totalPop > 0 ? ((totalPop - totalNoCoverage) / totalPop) * 100 : 0;
+      const unservedPct = totalPop > 0 ? (totalNoCoverage / totalPop) * 100 : 0;
+      const competitivePct = totalPop > 0 ? ((totalTwo + totalThreePlus) / totalPop) * 100 : 0;
+
+      ctx.log.info('fcc_get_coverage_summary succeeded', {
+        type: input.geography_type,
+        id: geographyId,
+        totalPop,
+        unservedPct: unservedPct.toFixed(1),
+      });
+
+      ctx.enrich({
+        appliedFilters: {
           geographyType: input.geography_type,
           ...(input.geography_id !== undefined && { geographyId: input.geography_id }),
           techFilter: input.tech_filter,
-          speedDown: input.speed_down,
+          speedDownMbps: parseFloat(input.speed_down),
           urbanRuralFilter: input.urban_rural_filter,
           tribalFilter: input.tribal_filter,
         },
-        ctx,
-      ),
-      service
-        .getGeographyName(input.geography_type, input.geography_id ?? '0', ctx)
-        .catch(() => undefined),
-    ]);
+      });
 
-    const geographyId = input.geography_type === 'nation' ? '0' : (input.geography_id ?? '');
-
-    if (segments.length === 0) {
-      throw ctx.fail(
-        'geography_not_found',
-        `No area data found for geography type="${input.geography_type}", id="${geographyId}". Check the FIPS code format or try a different geography type.`,
-      );
-    }
-
-    // Aggregate totals across all segments
-    let totalNoCoverage = 0;
-    let totalOne = 0;
-    let totalTwo = 0;
-    let totalThreePlus = 0;
-    let totalPop = 0;
-
-    for (const seg of segments) {
-      totalNoCoverage += seg.population.noCoverage;
-      totalOne += seg.population.oneProvider;
-      totalTwo += seg.population.twoProviders;
-      totalThreePlus += seg.population.threeOrMore;
-      totalPop += seg.population.total;
-    }
-
-    const coveragePct = totalPop > 0 ? ((totalPop - totalNoCoverage) / totalPop) * 100 : 0;
-    const unservedPct = totalPop > 0 ? (totalNoCoverage / totalPop) * 100 : 0;
-    const competitivePct = totalPop > 0 ? ((totalTwo + totalThreePlus) / totalPop) * 100 : 0;
-
-    ctx.log.info('fcc_get_coverage_summary succeeded', {
-      type: input.geography_type,
-      id: geographyId,
-      totalPop,
-      unservedPct: unservedPct.toFixed(1),
-    });
-
-    ctx.enrich({
-      appliedFilters: {
-        geographyType: input.geography_type,
-        ...(input.geography_id !== undefined && { geographyId: input.geography_id }),
+      return {
+        geography: {
+          type: input.geography_type,
+          id: geographyId,
+          ...(geoName && { name: geoName }),
+        },
         techFilter: input.tech_filter,
         speedDownMbps: parseFloat(input.speed_down),
-        urbanRuralFilter: input.urban_rural_filter,
-        tribalFilter: input.tribal_filter,
-      },
-    });
-
-    return {
-      geography: {
-        type: input.geography_type,
-        id: geographyId,
-        ...(geoName && { name: geoName }),
-      },
-      techFilter: input.tech_filter,
-      speedDownMbps: parseFloat(input.speed_down),
-      population: {
-        noCoverage: totalNoCoverage,
-        oneProvider: totalOne,
-        twoProviders: totalTwo,
-        threeOrMore: totalThreePlus,
-        total: totalPop,
-      },
-      coveragePct: Math.round(coveragePct * 10) / 10,
-      unservedPct: Math.round(unservedPct * 10) / 10,
-      competitivePct: Math.round(competitivePct * 10) / 10,
-      breakdown: segments.map((seg) => ({
-        urbanRural: seg.urbanRural,
-        tribal: seg.tribal,
         population: {
-          noCoverage: seg.population.noCoverage,
-          oneProvider: seg.population.oneProvider,
-          twoProviders: seg.population.twoProviders,
-          threeOrMore: seg.population.threeOrMore,
-          total: seg.population.total,
+          noCoverage: totalNoCoverage,
+          oneProvider: totalOne,
+          twoProviders: totalTwo,
+          threeOrMore: totalThreePlus,
+          total: totalPop,
         },
-        coveragePct: Math.round(seg.coveragePct * 10) / 10,
-        unservedPct: Math.round(seg.unservedPct * 10) / 10,
-      })),
-      dataVintage: 'June 2021 (last Form 477 filing period)',
-    };
+        coveragePct: Math.round(coveragePct * 10) / 10,
+        unservedPct: Math.round(unservedPct * 10) / 10,
+        competitivePct: Math.round(competitivePct * 10) / 10,
+        breakdown: segments.map((seg) => ({
+          urbanRural: seg.urbanRural,
+          tribal: seg.tribal,
+          population: {
+            noCoverage: seg.population.noCoverage,
+            oneProvider: seg.population.oneProvider,
+            twoProviders: seg.population.twoProviders,
+            threeOrMore: seg.population.threeOrMore,
+            total: seg.population.total,
+          },
+          coveragePct: Math.round(seg.coveragePct * 10) / 10,
+          unservedPct: Math.round(seg.unservedPct * 10) / 10,
+        })),
+        dataVintage: 'June 2021 (last Form 477 filing period)',
+      };
+    } catch (error) {
+      if (ctx.signal.aborted) throw error;
+      if (deadline.signal.aborted) throw deadline.signal.reason;
+      throw error;
+    } finally {
+      clearTimeout(timer);
+      deadline.abort();
+    }
   },
 
   format: (result) => {

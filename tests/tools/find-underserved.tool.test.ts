@@ -82,11 +82,104 @@ function scan(
 }
 
 describe('findUnderservedTool', () => {
+  it('pages the global ranking and distinguishes exhausted pages on both surfaces', async () => {
+    const page = await runToolContract(findUnderservedTool, { offset: 1, limit: 1 });
+    expect(page.structuredContent).toMatchObject({
+      offset: 1,
+      nextOffset: 2,
+      areas: [{ id: '28071', rank: 2 }],
+    });
+    expect(JSON.stringify(page.content)).toContain('Next offset');
+    const end = await runToolContract(findUnderservedTool, { offset: 3, limit: 1 });
+    expect(end.structuredContent).toMatchObject({ offset: 3, areas: [] });
+    expect(JSON.stringify(end.content)).toContain('exhausted');
+    expect(JSON.stringify(end.content)).not.toContain('No underserved areas found');
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     mockGetAreaStatsByType.mockResolvedValue(scan(MOCK_STATS));
     mockGetGeographyNames.mockResolvedValue(new Map());
   });
+
+  it.each([
+    ['AS', '60'],
+    ['GU', '66'],
+    ['MP', '69'],
+    ['PR', '72'],
+    ['VI', '78'],
+  ])('forwards territory %s with prefix %s', async (state, prefix) => {
+    const result = await runToolContract(findUnderservedTool, { state });
+    expect(result.isError).not.toBe(true);
+    expect(mockGetAreaStatsByType).toHaveBeenCalledWith(
+      expect.objectContaining({ stateFipsPrefix: prefix }),
+      expect.anything(),
+    );
+  });
+
+  it.each([-1, 0.5])('rejects invalid offset %s before scanning', async (offset) => {
+    expect((await runToolContract(findUnderservedTool, { offset })).isError).toBe(true);
+    expect(mockGetAreaStatsByType).not.toHaveBeenCalled();
+  });
+
+  it('breaks tied global ranks by GEOID across page boundaries', async () => {
+    mockGetAreaStatsByType.mockResolvedValue(
+      scan([
+        { ...MOCK_STATS[0], id: '00003' },
+        { ...MOCK_STATS[0], id: '00001' },
+        { ...MOCK_STATS[0], id: '00002' },
+      ]),
+    );
+    for (const [offset, id] of [
+      [0, '00001'],
+      [1, '00002'],
+      [2, '00003'],
+    ] as const) {
+      const result = await runToolContract(findUnderservedTool, { offset, limit: 1 });
+      expect(result.structuredContent).toMatchObject({
+        areas: [{ id, rank: offset + 1 }],
+        ...(offset < 2 ? { nextOffset: offset + 1 } : {}),
+      });
+      expect(JSON.stringify(result.content)).toContain(`| ${offset + 1} | ${id}`);
+    }
+  });
+
+  it('wires terrestrial default and new combinations through both surfaces', async () => {
+    const result = await runToolContract(findUnderservedTool, { state: 'MS' });
+    expect(result.structuredContent).toMatchObject({ appliedFilters: { techFilter: 'acfow' } });
+    expect(JSON.stringify(result.content)).toContain('acfow');
+    expect(mockGetAreaStatsByType).toHaveBeenCalledWith(
+      expect.objectContaining({ techFilter: 'acfow' }),
+      expect.anything(),
+    );
+    const combined = await runToolContract(findUnderservedTool, { state: 'MS', tech_filter: 'cf' });
+    expect(combined.structuredContent).toMatchObject({ appliedFilters: { techFilter: 'cf' } });
+    expect(JSON.stringify(combined.content)).toContain('cf');
+    expect(mockGetAreaStatsByType).toHaveBeenLastCalledWith(
+      expect.objectContaining({ techFilter: 'cf' }),
+      expect.anything(),
+    );
+  });
+
+  it.each(['abort', 'caller'])(
+    'rethrows optional-name cancellation at the handler seam: %s',
+    async (kind) => {
+      const controller = new AbortController();
+      const error =
+        kind === 'abort'
+          ? new DOMException('cancelled', 'AbortError')
+          : new Error('caller stopped');
+      mockGetGeographyNames.mockImplementation(() => {
+        if (kind === 'caller') controller.abort(error);
+        return Promise.reject(error);
+      });
+      await expect(
+        findUnderservedTool.handler(
+          findUnderservedTool.input.parse({}),
+          createMockContext({ errors: findUnderservedTool.errors, signal: controller.signal }),
+        ),
+      ).rejects.toBe(error);
+    },
+  );
 
   it('returns underserved areas ranked by noCoverage descending', async () => {
     const ctx = createMockContext({ errors: findUnderservedTool.errors });
@@ -358,6 +451,7 @@ describe('findUnderservedTool', () => {
           coveragePct: 46.4,
         },
       ],
+      offset: 0,
       geographyType: 'county',
       speedDownMbps: 25,
       urbanRuralFilter: 'R',
@@ -371,6 +465,7 @@ describe('findUnderservedTool', () => {
 
   it('formats output with rank, unserved, and oneProvider columns', () => {
     const output = {
+      offset: 0,
       areas: [
         {
           id: '28049',

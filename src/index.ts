@@ -36,6 +36,7 @@ await createApp({
   ),
   resources: [...allResourceDefinitions],
   prompts: [...allPromptDefinitions],
+  skills: 'skills',
   landing: { requireAuth: false },
   /*
    * No tool or resource handler calls `ctx.requestInput`, so nothing here needs
@@ -48,8 +49,8 @@ await createApp({
    * Cache hints for protocol revision 2026-07-28. The definition arrays are
    * static and nothing mutates them at runtime, and no definition declares an
    * auth scope, so every caller is served the same listing — hence `public`.
-   * Both resources read Form 477, a closed dataset final as of the June 2021
-   * filing period, so a read stays fresh far longer than a listing.
+   * The domain resources read the closed June 2021 Form 477 dataset, and
+   * the skill resources are static, so reads outlive listing cache entries.
    * 2025-era responses are unaffected.
    */
   cacheHints: {
@@ -60,16 +61,7 @@ await createApp({
     'server/discover': { ttlMs: 3_600_000, cacheScope: 'public' },
     'resources/read': { ttlMs: 86_400_000, cacheScope: 'public' },
   },
-  instructions:
-    'FCC broadband data server providing access to Form 477 (2015–2021) and BDC (2022+) datasets.\n' +
-    '- Start with fcc_geocode_block to convert coordinates to census block FIPS for address-level queries\n' +
-    '- Use fcc_get_coverage_summary for equity/policy analysis at state, county, or national level\n' +
-    '- Use fcc_search_geographies to discover place and CBSA GEOIDs by name before querying coverage\n' +
-    '- Use fcc_find_underserved for BEAD program eligibility and funding analysis\n' +
-    (hasBdcCredentials
-      ? '- Use fcc_list_downloads for BDC bulk-file manifests (2022+)\n'
-      : '- BDC bulk downloads are unavailable in this deployment\n') +
-    '- All Form 477 tools work without credentials and reflect data as of June 2021',
+  instructions: `FCC fixed broadband analysis uses keyless June 2021 Form 477 data. Resolve named geographies with fcc_search_geographies before coverage analysis; for location evidence, chain fcc_geocode_block to fcc_search_availability using its 2010-vintage blockFips, then use hoconum with fcc_get_provider for a national holding-company profile. Historical block coverage cannot establish current address service or funding eligibility. Area tools default to terrestrial coverage; their 100 Mbps tier is 100/10, not 100/20. ${hasBdcCredentials ? 'For newer BDC bulk-file manifests, call fcc_list_filing_periods with include_bdc=true before fcc_list_downloads; the credentialed API allows 10 calls per minute.' : 'BDC bulk-file manifests are unavailable in this deployment.'}`,
   setup(core) {
     initGeoApiService(core.config, core.storage);
     initOpenDataService(core.config, core.storage, serverConfig);

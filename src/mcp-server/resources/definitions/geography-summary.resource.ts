@@ -12,7 +12,7 @@ export const geographySummaryResource = resource('fcc-broadband://geography/{typ
   name: 'fcc-broadband-geography-summary',
   description:
     'Broadband coverage summary for a specific geography: provider counts by speed tier, urban/rural split, tribal breakdown. ' +
-    'Addressable by type and GEOID. Uses 25 Mbps speed threshold and acfosw technology filter.',
+    'Addressable by type and GEOID. Uses a fixed 25/3 Mbps download/upload threshold and satellite-inclusive acfosw technology filter for the June 2021 population snapshot; it cannot establish current eligibility or address service.',
   mimeType: 'application/json',
   params: z.object({
     type: z
@@ -92,7 +92,11 @@ export const geographySummaryResource = resource('fcc-broadband://geography/{typ
         },
         ctx,
       ),
-      service.getGeographyName(params.type, params.id, ctx).catch(() => undefined),
+      service.getGeographyName(params.type, params.id, ctx).catch((error: unknown) => {
+        if (ctx.signal.aborted || (error instanceof Error && error.name === 'AbortError'))
+          throw error;
+        return;
+      }),
     ]);
 
     /*

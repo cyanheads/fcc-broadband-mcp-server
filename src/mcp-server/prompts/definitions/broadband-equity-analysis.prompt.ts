@@ -24,7 +24,7 @@ export const broadbandEquityAnalysisPrompt = prompt('broadband_equity_analysis',
 
   generate: (args) => {
     const focusInstructions: Record<string, string> = {
-      underserved: `Focus on areas with zero broadband providers at 25 Mbps and 100 Mbps thresholds.
+      underserved: `Focus on areas with zero broadband providers at 25/3 Mbps and 100/10 Mbps thresholds.
 Cross-reference with Census income and poverty data to identify economic correlations.
 Use fcc_find_underserved to rank areas by unserved population.`,
       rural: `Focus on rural vs. urban broadband disparities using the urban_rural_filter parameter.
@@ -36,7 +36,7 @@ Note that tribal areas often show the highest unserved rates in FCC data.`,
       all: `Conduct a comprehensive analysis covering:
 1. Urban vs. rural disparities (urban_rural_filter)
 2. Tribal land connectivity gaps (tribal_filter="T")
-3. Speed tier analysis (compare 25 Mbps vs. 100 Mbps thresholds)
+3. Speed tier analysis (compare 25/3 Mbps vs. 100/10 Mbps thresholds)
 4. Competitive access (percentage with 2+ providers)`,
     };
 
@@ -53,8 +53,9 @@ Note that tribal areas often show the highest unserved rates in FCC data.`,
 
 ### Step 1 — Establish baseline coverage
 Use \`fcc_get_coverage_summary\` or \`fcc_find_underserved\` to get broadband coverage data for the region.
-- Technology filter: "acfosw" (all wired and fixed wireless)
-- Compare at both 25 Mbps (FCC legacy standard) and 100 Mbps (BEAD program standard)
+- Technology filter: "acfow" (satellite-excluding historical terrestrial screening, including all fixed wireless). Explicit "acfosw" includes satellite.
+- Compare at both 25/3 Mbps and 100/10 Mbps download/upload thresholds; the 100 key does not measure 100/20 service.
+- These historical population aggregates cannot establish current BEAD eligibility or address service. The acfow combination is not an exact program-technology eligibility filter.
 
 ### Step 2 — Focus area
 ${focusText}
@@ -72,10 +73,10 @@ Use \`fcc_search_providers\` and \`fcc_compare_areas\` to:
 - Compare counties or areas within the region by coverage metrics
 - Highlight areas with single-provider or no-provider coverage (monopoly/gap zones)
 
-### Step 5 — BEAD program context
+### Step 5 — Historical screening context
 For rural and underserved areas:
-- Identify BEAD-eligible locations (unserved at 25/100 Mbps)
-- Rank by unserved population for funding prioritization
+- Rank historical population gaps for further research
+- Verify current location-level service and applicable program rules separately before drawing eligibility conclusions
 - Note that Form 477 data is from June 2021; current conditions may differ
 
 ### Data limitations to acknowledge

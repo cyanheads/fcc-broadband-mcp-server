@@ -1,6 +1,6 @@
 # fcc-broadband-mcp-server - Directory Structure
 
-Generated on: 2026-10-19 01:40:18
+Generated on: 2026-11-03 21:10:23
 
 ```text
 fcc-broadband-mcp-server/
@@ -34,11 +34,15 @@ fcc-broadband-mcp-server/
 ├── framework-skills/
 │   ├── add-app-tool/
 │   │   └── SKILL.md
+│   ├── add-export/
 │   ├── add-prompt/
 │   │   └── SKILL.md
+│   ├── add-provider/
 │   ├── add-resource/
 │   │   └── SKILL.md
 │   ├── add-service/
+│   │   └── SKILL.md
+│   ├── add-skill/
 │   │   └── SKILL.md
 │   ├── add-test/
 │   │   └── SKILL.md
@@ -138,6 +142,9 @@ fcc-broadband-mcp-server/
 │   ├── prune-musl-packages.ts
 │   ├── release-github.ts
 │   └── tree.ts
+├── skills/
+│   └── fcc-broadband-guide/
+│       └── SKILL.md
 ├── src/
 │   ├── config/
 │   │   └── server-config.ts
@@ -178,6 +185,7 @@ fcc-broadband-mcp-server/
 │   │       │   ├── ingest.ts
 │   │       │   ├── state-fips.ts
 │   │       │   └── stores.ts
+│   │       ├── area-filters.ts
 │   │       ├── open-data-service.ts
 │   │       └── types.ts
 │   └── index.ts
@@ -195,6 +203,7 @@ fcc-broadband-mcp-server/
 │   │   ├── geo-api/
 │   │   │   └── geo-api-service.test.ts
 │   │   ├── open-data/
+│   │   │   ├── area-filters.test.ts
 │   │   │   ├── form477-mirror.test.ts
 │   │   │   ├── geography-search.test.ts
 │   │   │   ├── mirror-helpers.test.ts
@@ -219,7 +228,8 @@ fcc-broadband-mcp-server/
 │   │   ├── search-providers.tool.test.ts
 │   │   └── strict-inputs.test.ts
 │   ├── index-env.test.ts
-│   └── index.test.ts
+│   ├── index.test.ts
+│   └── mcpb-agent-docs.test.ts
 ├── .dockerignore
 ├── .env.example
 ├── .gitattributes
@@ -236,7 +246,9 @@ fcc-broadband-mcp-server/
 ├── Dockerfile
 ├── LICENSE
 ├── manifest.json
+├── mcp.json
 ├── package.json
+├── plugin.json
 ├── README.md
 ├── server.json
 ├── tsconfig.build.json

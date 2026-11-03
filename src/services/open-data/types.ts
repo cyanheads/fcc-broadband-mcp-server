@@ -127,10 +127,13 @@ export interface RawGeographyRow {
   type?: string;
 }
 
-/** A distinct named place or CBSA in the 2021 FCC geography lookup. */
+/** Geography types discoverable by name in the 2021 FCC lookup. */
+export const GEOGRAPHY_TYPES = ['state', 'county', 'cd', 'place', 'cbsa', 'tribal'] as const;
+
+/** A distinct named geography in the 2021 FCC geography lookup. */
 export interface GeographyMatch {
   geography_id: string;
-  geography_type: 'place' | 'cbsa';
+  geography_type: (typeof GEOGRAPHY_TYPES)[number];
   name: string;
 }
 
@@ -228,7 +231,7 @@ export interface ProviderRecord {
  */
 export interface ProviderSearchResult {
   /**
-   * Distinct holding companies the scan found, before `limit` trimmed the
+   * Distinct holding companies the scan found, before offset/limit trimmed the
    * returned list. The true match count only when `scanTruncated` is false.
    */
   matched: number;

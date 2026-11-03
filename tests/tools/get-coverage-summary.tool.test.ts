@@ -3,9 +3,11 @@
  * @module tests/tools/get-coverage-summary.tool.test
  */
 
+import type { AppConfig } from '@cyanheads/mcp-ts-core/config';
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
+import type { StorageService } from '@cyanheads/mcp-ts-core/storage';
 import { createMockContext, getEnrichment, runToolContract } from '@cyanheads/mcp-ts-core/testing';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getCoverageSummaryTool } from '@/mcp-server/tools/definitions/get-coverage-summary.tool.js';
 
 const mockGetAreaSegments = vi.fn();
@@ -34,10 +36,336 @@ const MOCK_SEGMENT = {
 };
 
 describe('getCoverageSummaryTool', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+  it('preserves an explicit satellite-inclusive filter and makes no confirmation read for actual rows', async () => {
+    mockGetAreaSegments.mockResolvedValue([MOCK_SEGMENT]);
+    mockGetGeographyName.mockResolvedValue(undefined);
+    const result = await runToolContract(getCoverageSummaryTool, {
+      geography_type: 'county',
+      geography_id: '28009',
+      tech_filter: 'acfosw',
+    });
+    expect(result.structuredContent).toMatchObject({
+      techFilter: 'acfosw',
+      population: { total: 100000 },
+    });
+    expect(JSON.stringify(result.content)).toContain('acfosw');
+    expect(mockGetAreaSegments).toHaveBeenCalledTimes(1);
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     mockGetAreaSegments.mockResolvedValue([MOCK_SEGMENT]);
     mockGetGeographyName.mockResolvedValue('Mississippi');
+  });
+
+  it('defaults to terrestrial screening on both surfaces', async () => {
+    const result = await runToolContract(getCoverageSummaryTool, {
+      geography_type: 'state',
+      geography_id: '28',
+    });
+    expect(result.structuredContent).toMatchObject({ techFilter: 'acfow' });
+    expect(JSON.stringify(result.content)).toContain('acfow');
+    expect(mockGetAreaSegments).toHaveBeenCalledWith(
+      expect.objectContaining({ techFilter: 'acfow' }),
+      expect.anything(),
+    );
+  });
+
+  it.each([
+    { urban_rural_filter: 'U' },
+    { tribal_filter: 'T' },
+    { urban_rural_filter: 'U', tribal_filter: 'T' },
+  ] as const)(
+    'confirms empty demographic selections without fabricating breakdown rows: %j',
+    async (filters) => {
+      mockGetAreaSegments.mockResolvedValueOnce([]).mockResolvedValueOnce([MOCK_SEGMENT]);
+      const result = await runToolContract(getCoverageSummaryTool, {
+        geography_type: 'county',
+        geography_id: '28009',
+        tech_filter: 'acfosw',
+        speed_down: '100',
+        ...filters,
+      });
+      expect(result.isError).not.toBe(true);
+      expect(result.structuredContent).toMatchObject({
+        population: { total: 0, noCoverage: 0 },
+        breakdown: [],
+        coveragePct: 0,
+        unservedPct: 0,
+        competitivePct: 0,
+        notice: expect.stringContaining('No population rows'),
+      });
+      expect(JSON.stringify(result.content)).toContain('No population rows');
+      expect(JSON.stringify(result.content)).toContain('**Total Population:** 0');
+      expect(mockGetAreaSegments).toHaveBeenCalledTimes(2);
+      expect(mockGetAreaSegments.mock.calls[1]![0]).toEqual({
+        geographyType: 'county',
+        geographyId: '28009',
+        techFilter: 'acfosw',
+        speedDown: '100',
+      });
+    },
+  );
+
+  it.each(['unavailable', 'abort'] as const)(
+    'propagates a failed empty-segment confirmation: %s',
+    async (failure) => {
+      const error =
+        failure === 'abort'
+          ? new DOMException('cancelled', 'AbortError')
+          : new Error('unavailable');
+      mockGetAreaSegments.mockResolvedValueOnce([]).mockRejectedValueOnce(error);
+      const ctx = createMockContext({ errors: getCoverageSummaryTool.errors });
+      const input = getCoverageSummaryTool.input.parse({
+        geography_type: 'county',
+        geography_id: '28009',
+        urban_rural_filter: 'U',
+      });
+      await expect(getCoverageSummaryTool.handler(input, ctx)).rejects.toBe(error);
+      expect(mockGetAreaSegments).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it('keeps a nonexistent filtered geography not-found even when its name resolves', async () => {
+    mockGetAreaSegments.mockResolvedValue([]);
+    const result = await runToolContract(getCoverageSummaryTool, {
+      geography_type: 'county',
+      geography_id: '99999',
+      tribal_filter: 'T',
+    });
+    expect(result.structuredContent).toMatchObject({
+      error: {
+        data: {
+          reason: 'geography_not_found',
+          recovery: { hint: expect.stringContaining('fcc_search_geographies') },
+        },
+      },
+    });
+    expect(JSON.stringify(result.content)).toContain('geography_not_found');
+    expect(mockGetAreaSegments).toHaveBeenCalledTimes(2);
+  });
+
+  it('never confirms an unfiltered empty query', async () => {
+    mockGetAreaSegments.mockResolvedValue([]);
+    await runToolContract(getCoverageSummaryTool, {
+      geography_type: 'county',
+      geography_id: '99999',
+    });
+    expect(mockGetAreaSegments).toHaveBeenCalledTimes(1);
+  });
+
+  it('rethrows cancellation from optional name lookup at the handler seam', async () => {
+    const error = new DOMException('cancelled', 'AbortError');
+    mockGetGeographyName.mockRejectedValue(error);
+    const ctx = createMockContext({ errors: getCoverageSummaryTool.errors });
+    await expect(
+      getCoverageSummaryTool.handler(
+        getCoverageSummaryTool.input.parse({ geography_type: 'state', geography_id: '28' }),
+        ctx,
+      ),
+    ).rejects.toBe(error);
+  });
+
+  it('bounds both data reads by one total deadline and classifies its failure on both surfaces', async () => {
+    vi.useFakeTimers();
+    mockGetAreaSegments.mockResolvedValueOnce([]).mockImplementationOnce(
+      (_options, ctx) =>
+        new Promise((_resolve, reject) => {
+          ctx.signal.addEventListener('abort', () => reject(ctx.signal.reason), { once: true });
+        }),
+    );
+    const pending = runToolContract(getCoverageSummaryTool, {
+      geography_type: 'county',
+      geography_id: '28009',
+      tribal_filter: 'T',
+    });
+    await vi.advanceTimersByTimeAsync(48_000);
+    const result = await pending;
+    expect(result.structuredContent).toMatchObject({
+      error: {
+        code: JsonRpcErrorCode.Timeout,
+        data: { reason: 'coverage_timeout', recovery: { hint: expect.stringContaining('retry') } },
+      },
+    });
+    expect(JSON.stringify(result.content)).toContain('coverage_timeout');
+    expect(JSON.stringify(result.content)).toContain('48');
+    expect(mockGetAreaSegments).toHaveBeenCalledTimes(2);
+  });
+
+  it('spends the same deadline across the first read and confirmation', async () => {
+    vi.useFakeTimers();
+    mockGetAreaSegments
+      .mockImplementationOnce(() => new Promise((resolve) => setTimeout(() => resolve([]), 30_000)))
+      .mockImplementationOnce(
+        (_options, ctx) =>
+          new Promise((_resolve, reject) => {
+            ctx.signal.addEventListener('abort', () => reject(ctx.signal.reason), { once: true });
+          }),
+      );
+    const pending = runToolContract(getCoverageSummaryTool, {
+      geography_type: 'county',
+      geography_id: '28009',
+      urban_rural_filter: 'U',
+    });
+    await vi.advanceTimersByTimeAsync(48_000);
+    expect((await pending).structuredContent).toMatchObject({
+      error: { data: { reason: 'coverage_timeout' } },
+    });
+    expect(mockGetAreaSegments).toHaveBeenCalledTimes(2);
+  });
+
+  it('retains successful data when only the optional name reaches the local deadline', async () => {
+    vi.useFakeTimers();
+    mockGetGeographyName.mockImplementation(
+      (_type, _id, ctx) =>
+        new Promise((_resolve, reject) => {
+          ctx.signal.addEventListener('abort', () => reject(ctx.signal.reason), { once: true });
+        }),
+    );
+    const pending = runToolContract(getCoverageSummaryTool, {
+      geography_type: 'state',
+      geography_id: '28',
+    });
+    await vi.advanceTimersByTimeAsync(48_000);
+    const result = await pending;
+    expect(result.isError).not.toBe(true);
+    expect(result.structuredContent).toMatchObject({
+      population: { total: 100000 },
+      geography: { type: 'state', id: '28' },
+    });
+  });
+
+  it('completes demographic confirmation independently of an unavailable optional name', async () => {
+    vi.useFakeTimers();
+    mockGetAreaSegments.mockResolvedValueOnce([]).mockResolvedValueOnce([MOCK_SEGMENT]);
+    mockGetGeographyName.mockImplementation(
+      (_type, _id, ctx) =>
+        new Promise((_resolve, reject) => {
+          ctx.signal.addEventListener('abort', () => reject(ctx.signal.reason), { once: true });
+        }),
+    );
+    const pending = runToolContract(getCoverageSummaryTool, {
+      geography_type: 'county',
+      geography_id: '28009',
+      tribal_filter: 'T',
+    });
+    await vi.advanceTimersByTimeAsync(48_000);
+    const result = await pending;
+    expect(result.isError).not.toBe(true);
+    expect(result.structuredContent).toMatchObject({
+      population: { total: 0 },
+      breakdown: [],
+      notice: expect.stringContaining('No population rows'),
+    });
+    expect(mockGetAreaSegments).toHaveBeenCalledTimes(2);
+  });
+
+  it('propagates caller cancellation during confirmation unchanged and forwards the same signal', async () => {
+    const controller = new AbortController();
+    const error = new Error('caller stopped');
+    mockGetAreaSegments.mockResolvedValueOnce([]).mockImplementationOnce((_options, ctx) => {
+      controller.abort(error);
+      expect(ctx.signal.aborted).toBe(true);
+      return Promise.reject(error);
+    });
+    const ctx = createMockContext({
+      errors: getCoverageSummaryTool.errors,
+      signal: controller.signal,
+    });
+    const input = getCoverageSummaryTool.input.parse({
+      geography_type: 'county',
+      geography_id: '28009',
+      tribal_filter: 'T',
+    });
+    await expect(getCoverageSummaryTool.handler(input, ctx)).rejects.toBe(error);
+    expect(mockGetAreaSegments.mock.calls[0]![1].signal).toBe(
+      mockGetAreaSegments.mock.calls[1]![1].signal,
+    );
+  });
+
+  it('propagates failure on the first data read without a confirmation', async () => {
+    const error = new Error('first read unavailable');
+    mockGetAreaSegments.mockRejectedValueOnce(error);
+    const ctx = createMockContext({ errors: getCoverageSummaryTool.errors });
+    await expect(
+      getCoverageSummaryTool.handler(
+        getCoverageSummaryTool.input.parse({
+          geography_type: 'county',
+          geography_id: '28009',
+          tribal_filter: 'T',
+        }),
+        ctx,
+      ),
+    ).rejects.toBe(error);
+    expect(mockGetAreaSegments).toHaveBeenCalledTimes(1);
+  });
+
+  it('bounds real service retries on the confirmation read without replacing the retry path', async () => {
+    vi.useFakeTimers();
+    const { OpenDataService } = await vi.importActual<
+      typeof import('@/services/open-data/open-data-service.js')
+    >('@/services/open-data/open-data-service.js');
+    const service = new OpenDataService({} as AppConfig, {} as StorageService, {
+      mirrorEnabled: false,
+      mirrorPath: 'unused',
+    });
+    mockGetAreaSegments.mockImplementation((options, ctx) => service.getAreaSegments(options, ctx));
+    const fetchMock = vi.fn((url: string, options?: RequestInit) => {
+      const where = new URL(url).searchParams.get('$where') ?? '';
+      if (where.includes("tribal_non='T'")) return Promise.resolve(Response.json([]));
+      return new Promise<Response>((_resolve, reject) => {
+        options?.signal?.addEventListener('abort', () => reject(options.signal?.reason), {
+          once: true,
+        });
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const pending = runToolContract(getCoverageSummaryTool, {
+      geography_type: 'county',
+      geography_id: '28009',
+      tribal_filter: 'T',
+    });
+    await vi.advanceTimersByTimeAsync(48_000);
+    const result = await pending;
+    expect(result.structuredContent).toMatchObject({
+      error: { code: JsonRpcErrorCode.Timeout, data: { reason: 'coverage_timeout' } },
+    });
+    expect(JSON.stringify(result.content)).toContain('coverage_timeout');
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it('preserves a confirmation HTTP failure through the real service status mapper on both surfaces', async () => {
+    const { OpenDataService } = await vi.importActual<
+      typeof import('@/services/open-data/open-data-service.js')
+    >('@/services/open-data/open-data-service.js');
+    const service = new OpenDataService({} as AppConfig, {} as StorageService, {
+      mirrorEnabled: false,
+      mirrorPath: 'unused',
+    });
+    mockGetAreaSegments.mockImplementation((options, ctx) => service.getAreaSegments(options, ctx));
+    const fetchMock = vi.fn((url: string) =>
+      Promise.resolve(
+        new URL(url).searchParams.get('$where')?.includes("tribal_non='T'")
+          ? Response.json([])
+          : new Response('Forbidden', { status: 403 }),
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const result = await runToolContract(getCoverageSummaryTool, {
+      geography_type: 'county',
+      geography_id: '28009',
+      tribal_filter: 'T',
+    });
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result.structuredContent)).not.toContain('geography_not_found');
+    expect(JSON.stringify(result.structuredContent)).toContain('FCC Open Data');
+    expect(JSON.stringify(result.content)).toContain('FCC Open Data');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it('returns coverage summary for a state', async () => {

@@ -6,13 +6,13 @@
 
 | Name | Description | Key Inputs | Annotations |
 |:-----|:------------|:-----------|:------------|
-| `fcc_search_geographies` | Discover distinct 2021 census place and CBSA GEOIDs by literal name substring; stable offset paging with one-row lookahead. | `name`, `geography_type`, `limit`, `offset` | `readOnlyHint: true, openWorldHint: false, idempotentHint: true` |
+| `fcc_search_geographies` | Discover distinct 2021 state, county, congressional district, place, CBSA, and tribal GEOIDs by literal name substring; stable offset paging with one-row lookahead. | `name`, `geography_type`, `limit`, `offset` | `readOnlyHint: true, openWorldHint: false, idempotentHint: true` |
 | `fcc_search_availability` | Queries broadband providers and advertised speeds at a census block, filtered by technology and speed threshold. Answers "which ISPs serve this location and what speeds do they offer?" — the starting point for any address-level broadband lookup. Requires a 15-digit census block FIPS code; use `fcc_geocode_block` to convert coordinates first. | `block_fips`, `tech_filter`, `min_speed_down`, `consumer` | `readOnlyHint: true, openWorldHint: false` |
 | `fcc_get_coverage_summary` | Returns a broadband coverage summary for a geography — population with zero, one, two, or three-plus providers at a given speed threshold, split by urban/rural and tribal/non-tribal. Primary tool for digital divide and equity analysis. Supports state, county, congressional district, census place, CBSA, tribal area, and national level. | `geography_type`, `geography_id`, `tech_filter`, `speed_down`, `urban_rural_filter`, `tribal_filter` | `readOnlyHint: true, openWorldHint: false` |
-| `fcc_compare_areas` | Compares broadband coverage metrics across multiple geographies of the same type and returns a ranked table sorted by unserved or underserved population. Answers "which counties in this state have the worst broadband access?" and drives BEAD funding prioritization. | `geography_type`, `geography_ids`, `compare_all_states`, `tech_filter`, `speed_down`, `sort_by` | `readOnlyHint: true, openWorldHint: false` |
+| `fcc_compare_areas` | Compares historical broadband coverage metrics across geographies of the same type, worst first. | `geography_type`, `geography_ids`, `compare_all_states`, `tech_filter`, `speed_down`, `sort_by` | `readOnlyHint: true, openWorldHint: false` |
 | `fcc_search_providers` | Searches for ISPs by holding company name, filtered by state and technology type. Returns a deduplicated list of matching providers with `hoconum` identifiers for follow-up calls. Answers "which ISPs serve Washington with fiber?" and "find all Comcast entities." Geographic filtering is state-level; sub-state granularity requires cross-referencing block data. The live path reads a bounded window of deployment rows to find which companies match and reports `scanTruncated` when that set is a sample rather than every match; each company it returns then carries its complete national states and technologies, resolved per company. | `name_search`, `state`, `tech_filter` | `readOnlyHint: true, openWorldHint: false` |
 | `fcc_get_provider` | Returns a national-level coverage profile for a specific holding company (by `hoconum`): technologies deployed and the population covered at each download speed tier, taken from the provider summary table's all-technology roll-up. | `hoconum` | `readOnlyHint: true, openWorldHint: false` |
-| `fcc_find_underserved` | Finds geographic areas with limited or no broadband coverage at a given speed threshold, ranked by underserved population. Accepts a state to narrow scope or runs nationwide. The core tool for BEAD program analysis and broadband equity research. Defaults to rural areas where underservice is most concentrated. | `state`, `geography_type`, `speed_down`, `tech_filter`, `min_unserved_pop`, `urban_rural_filter`, `limit` | `readOnlyHint: true, openWorldHint: false` |
+| `fcc_find_underserved` | Ranks historical broadband gaps by unserved population, statewide or nationwide. Defaults to rural areas and excludes satellite. | `state`, `geography_type`, `speed_down`, `tech_filter`, `min_unserved_pop`, `urban_rural_filter`, `limit`, `offset` | `readOnlyHint: true, openWorldHint: false` |
 | `fcc_geocode_block` | Converts a latitude/longitude coordinate to a census block FIPS code (15-digit), county FIPS, county name, state FIPS, state code, and state name. Required prerequisite for `fcc_search_availability` since the broadband dataset is indexed by census block, not address. Uses FCC's public Geo API — no auth required. | `latitude`, `longitude` | `readOnlyHint: true, openWorldHint: false, idempotentHint: true` |
 | `fcc_list_filing_periods` | Returns the available data vintages: Form 477 filing periods (hardcoded Jun 2015 – Jun 2021, always available) and BDC as-of dates from the authenticated API (Jun 2022 onward, requires credentials). Call this before `fcc_list_downloads` to determine valid `as_of_date` values. | `include_bdc` | `readOnlyHint: true, openWorldHint: false` |
 | `fcc_list_downloads` | Lists downloadable BDC data files for a specific as-of date — fixed availability by state and provider, mobile coverage, and challenge data — with file metadata (provider, state, technology, record count). Download URLs are included for each file. Requires BDC API credentials. | `as_of_date`, `data_type`, `state`, `provider_name`, `technology_type` | `readOnlyHint: true, openWorldHint: false` |
@@ -29,6 +29,10 @@
 | Name | Description | Args |
 |:-----|:------------|:-----|
 | `broadband_equity_analysis` | Structures a digital divide analysis comparing broadband access across demographic groups — guides chaining with Census and BLS data. | `region`, `focus` (`underserved`, `rural`, `tribal`, `all`) |
+
+### Published skill
+
+`skills/fcc-broadband-guide/SKILL.md` carries identifier chains and gates for comparing populations, interpreting empty segments, and distinguishing sampled providers from national footprints. `createApp({ skills: 'skills' })` serves it at `skill://fcc-broadband-guide/SKILL.md`; the same tree ships through plugins, npm, Docker, and MCPB. The guide separates historical screening from current address service and funding eligibility because the tools cannot establish those conclusions from June 2021 population aggregates.
 
 ---
 
@@ -51,7 +55,7 @@ The digital divide and broadband equity angle is the dominant use case: an agent
 - All Form 477 data tools (`fcc_search_availability`, `fcc_search_geographies`, `fcc_get_coverage_summary`, `fcc_compare_areas`, `fcc_search_providers`, `fcc_get_provider`, `fcc_find_underserved`, `fcc_geocode_block`) work without any credentials
 - BDC download tools (`fcc_list_filing_periods` with `include_bdc=true`, `fcc_list_downloads`) require a free FCC user account at broadbandmap.fcc.gov; credentials provided via env vars
 - No write operations — all data is ISP-reported and read-only
-- Geographic queries use FIPS codes; `fcc_geocode_block` bridges from coordinates and `fcc_search_geographies` bridges place/CBSA names
+- Geographic queries use FIPS codes; `fcc_geocode_block` bridges from coordinates and `fcc_search_geographies` resolves names for every non-national geography type
 - Form 477 data covers 2015–June 2021; BDC data covers June 2022 onward — the server bridges both eras, with a data gap noted in tool descriptions
 - Data is US federal government public domain (17 USC §105) — safe to distribute and cache
 - Rate limits: Socrata is generous for reasonable use; FCC Geo API has no documented limit; BDC API is 10 calls/min per account
@@ -108,15 +112,15 @@ Each step is independently testable.
     .describe('Geographic aggregation level. "nation" = US-wide totals (id not needed). "cd" = congressional district. "place" = census-designated place. "cbsa" = core-based statistical area (metro area). "tribal" = tribal land area.'),
   geography_id: z.string().optional()
     .describe('FIPS GEOID for the geography. State: 2-digit (e.g., "06" for California). County: 5-digit (e.g., "06037" for LA County). Congressional district: 4-digit state+district (e.g., "0601"). CBSA: 5-digit code. Omit for nation-level queries.'),
-  tech_filter: z.enum(['acfosw', 'f', 'c', 'a', 'o', 's', 'w'])
-    .default('acfosw')
-    .describe('Technology filter. "acfosw" = any wired or fixed wireless (recommended baseline). "f" = fiber only. "c" = cable only. "a" = ADSL/DSL only. "s" = satellite only. "w" = fixed wireless only. Mix letters for combinations, e.g., "fc" = fiber or cable.'),
+  tech_filter: z.enum(AREA_TECH_FILTERS)
+    .default('acfow')
+    .describe(AREA_TECH_DESCRIPTION),
   speed_down: z.enum(['0.2', '4', '10', '25', '100', '250', '1000'])
     .default('25')
-    .describe('Minimum download speed threshold in Mbps. 25 = FCC legacy broadband definition. 100 = BEAD program standard (use this for current policy analysis). "0.2" = any service above 200 Kbps.'),
+    .describe(AREA_SPEED_DESCRIPTION),
   urban_rural_filter: z.enum(['all', 'R', 'U'])
     .default('all')
-    .describe('Filter to urban ("U") or rural ("R") areas only, or "all" for both combined. Rural breakdown is key for BEAD program analysis.'),
+    .describe('Filter to urban ("U") or rural ("R") areas only, or "all" for both combined.'),
   tribal_filter: z.enum(['all', 'T', 'N'])
     .default('all')
     .describe('Filter to tribal ("T") or non-tribal ("N") areas. Use "T" to assess Native American connectivity gaps.'),
@@ -137,7 +141,7 @@ Each step is independently testable.
     total: z.number(),
   }),
   coveragePct: z.number().describe('Percentage of population with at least one provider at the given speed.'),
-  unservedPct: z.number().describe('Percentage with zero providers — FCC "unserved" definition.'),
+  unservedPct: z.number().describe('Percentage with zero providers in the selected historical technology and speed view.'),
   competitivePct: z.number().describe('Percentage with two or more providers.'),
   breakdown: z.array(z.object({
     urbanRural: z.enum(['R', 'U']),
@@ -151,7 +155,7 @@ Each step is independently testable.
 ```
 
 **Error contract:**
-- `geography_not_found` (`NotFound`): No Area Table rows for the selected geography. Check the type's GEOID shape; use `fcc_search_geographies` to discover place/CBSA identifiers.
+- `geography_not_found` (`NotFound`): No Area Table rows for the selected geography. Check the type's GEOID shape; use `fcc_search_geographies` to discover non-national identifiers. A requested demographic segment with no rows returns zero totals and a notice only after an unfiltered demographic query confirms the geography exists.
 - `invalid_geography_combo` (`ValidationError`): `geography_id` omitted for a non-nation type, or `geography_type` is `nation` but `geography_id` provided.
 
 ---
@@ -173,7 +177,7 @@ Each step is independently testable.
 }
 ```
 
-**Output:** Array of provider records per block, each with `provider_id`, `providername`, `holdingcompanyname`, `hoconum`, `techcode`, `maxaddown`, `maxadup`, `consumer`, `business`.
+**Output:** `blockFips`, distinct holding-company `totalProviders`, `dataVintage`, and provider offerings with `providerId`, `providerName`, `holdingCompanyName`, `hoconum`, `stateAbbr`, `techCode`, `techLabel`, `maxDownloadMbps`, `maxUploadMbps`, `consumer`, and `business`.
 
 **Error contract:**
 - `block_not_found` (`NotFound`): No providers in the dataset for this census block. Block may be a non-residential area or have no reported coverage.
@@ -193,10 +197,14 @@ Each step is independently testable.
     .describe('Technology codes to filter, from the complete Form 477 taxonomy (0, 10–12, 20, 30, 40–43, 50, 60, 70, 90). Omit for all technologies.'),
   limit: z.number().int().min(1).max(200).default(50)
     .describe('Max providers to return.'),
+  offset: z.number().int().min(0).default(0)
+    .describe('Zero-based start within matching companies.'),
 }
 ```
 
-**Output:** Deduplicated list of matching providers: `hoconum`, `holdingcompanyname`, `states_served` (array of state abbreviations), `tech_codes` (unique codes across all filings).
+**Output:** Deduplicated `providers` with `hoconum`, `holdingCompanyName`, `statesServed` (state abbreviations), and `techCodes` (unique national filing codes), plus page `offset`, optional `nextOffset`, `totalFound` (returned count), and `dataVintage`. The complete-match count is the optional enrichment field `totalCount`.
+
+**Paging:** the full mirror drains matching provider dimension rows in bounded, stable `combo` order before deduplicating, sorting companies by `hoconum`, and slicing the requested page. Only returned companies need footprint resolution. Live search retains its unordered 1,000-row identity window; continuation covers that sample only, with no cross-request stability guarantee. `nextOffset` is absent on the last page, and exhausted-page guidance differs from a filter set matching no companies. Unknown USPS state/territory codes fail as `unknown_state` before querying; state membership comes from the shared state/FIPS source.
 
 ---
 
@@ -206,15 +214,15 @@ Each step is independently testable.
 ```ts
 {
   geography_type: z.enum(['state', 'county', 'cd', 'place', 'cbsa', 'tribal']),
-  geography_ids: z.array(z.string()).min(2).max(50).optional()
-    .describe('Array of FIPS GEOIDs to compare. Up to 50 geographies. For all 50 states, omit and set compare_all_states=true.'),
+  geography_ids: z.array(z.string()).min(2).optional()
+    .describe('FIPS GEOIDs to compare. The first 300 distinct IDs are queried; duplicates and excluded IDs are disclosed. For all 50 states plus DC, omit and set compare_all_states=true.'),
   compare_all_states: z.boolean().default(false)
     .describe('When true, compares all 50 states + DC. Overrides geography_ids. Useful for national ranking.'),
-  tech_filter: z.enum(['acfosw', 'f', 'c', 'a', 'o', 's', 'w']).default('acfosw'),
+  tech_filter: z.enum(AREA_TECH_FILTERS).default('acfow'),
   speed_down: z.enum(['0.2', '4', '10', '25', '100', '250', '1000']).default('25'),
   sort_by: z.enum(['unserved_pct', 'unserved_pop', 'coverage_pct', 'competitive_pct'])
     .default('unserved_pct')
-    .describe('Ranking field. "unserved_pct" = share of population with no broadband. "unserved_pop" = raw headcount useful for BEAD funding allocation. "coverage_pct" = share with any coverage. "competitive_pct" = share with 2+ providers. Every option ranks worst-first, so rank 1 is the highest unserved share or headcount, or the lowest coverage or competitive share.'),
+    .describe('Ranking field. "unserved_pct" = share of population without coverage. "unserved_pop" = raw headcount. "coverage_pct" = share with any coverage. "competitive_pct" = share with 2+ providers. Every option ranks worst-first, so rank 1 is the highest unserved share or headcount, or the lowest coverage or competitive share.'),
 }
 ```
 
@@ -228,16 +236,19 @@ Each step is independently testable.
   state: z.string().regex(/^[A-Z]{2}$/).optional()
     .describe('2-letter USPS state or territory code (e.g., "WY", "MS", "PR") to limit scope. An unrecognized code is rejected, not ignored. Omit for nationwide search — returns top areas only.'),
   geography_type: z.enum(['county', 'cd', 'place', 'cbsa']).default('county')
-    .describe('Geographic granularity. "county" is most useful for policy analysis and BEAD eligibility.'),
+    .describe('Geographic granularity for historical coverage screening.'),
   speed_down: z.enum(['0.2', '4', '10', '25', '100', '250', '1000']).default('25'),
-  tech_filter: z.enum(['acfosw', 'f', 'c', 'a', 'o', 's', 'w']).default('acfosw'),
+  tech_filter: z.enum(AREA_TECH_FILTERS).default('acfow'),
   min_unserved_pop: z.number().int().min(0).default(1)
     .describe('Minimum population with no coverage to include in results. Defaults to 1, which keeps fully covered areas out of a ranking of underserved ones. Set to 0 to rank every area regardless of unserved population, or higher to drop small gaps (e.g., 500 keeps only areas with at least 500 unserved residents).'),
   urban_rural_filter: z.enum(['all', 'R', 'U']).default('R')
     .describe('Defaults to rural ("R") — where underservice is most concentrated. Use "U" to find underserved urban areas (digital redlining research). Set to "all" for both.'),
   limit: z.number().int().min(1).max(100).default(20),
+  offset: z.number().int().min(0).default(0),
 }
 ```
+
+Rank the complete computed match set before slicing, with GEOID tie-breaking and ranks continuing from `offset + 1`. `totalFound` counts matching areas before paging; follow `nextOffset` while present. Existing raw-scan truncation remains disclosed, and an exhausted page is distinct from no matching areas.
 
 ---
 
@@ -284,7 +295,7 @@ Each step is independently testable.
 | Area Table (Jun 2021) | `xvwq-qtaj` | Geography-level: population by provider-count bracket × speed tier × urban_rural × tribal segment | Jun 2021 |
 | Provider Summary Table (Jun 2021) | `yd9y-6jqe` | Provider × tech covered population (national totals only, no state breakdown; no holding-company name column). `d_1`–`d_8` = download speed tiers (0.2/4/10/25/100/250/500/1000 Mbps). `u_1`–`u_9` = upload tiers. `tech` carries both individual Form 477 codes and the overlapping roll-ups `all`, `adsl`, `cable`, `other` — the `all` row is the non-overlapping national total, so rows must never be summed. | Jun 2021 |
 | Provider Geographic Footprint | `awrw-t4m8` | `hoconum` → bounding box only. Not a name crosswalk — names must come from `jdr4-3q4p`. | Updated |
-| Geography Lookup | `v5vt-e7vw` | GEOID → name, centroid lat/lng, bounding box. Use to resolve geography IDs to human-readable names in tool output. | Updated |
+| Geography Lookup | `v5vt-e7vw` | GEOID → name, centroid lat/lng, bounding box. Discovery and name resolution select `year='2021'` to match the analysis vintage. | 2021 selected |
 
 ### Area Table Schema (`xvwq-qtaj`)
 
@@ -295,13 +306,15 @@ Each step is independently testable.
 | `tech` | Letter combinations: `a`=ADSL, `c`=cable, `f`=fiber, `o`=other, `s`=satellite, `w`=wireless | Combined letters = any of those technologies |
 | `urban_rural` | `R` (rural), `U` (urban) | Single letter — not the full word |
 | `tribal_non` | `T` (tribal), `N` (non-tribal) | Single letter |
-| `speed` | `'0.2'`, `'4'`, `'10'`, `'25'`, `'100'`, `'250'`, `'1000'` | Mbps download threshold; string type |
+| `speed` | `'0.2'`, `'4'`, `'10'`, `'25'`, `'100'`, `'250'`, `'1000'` | Download keys for 0.2/0.2, 4/1, 10/1, 25/3, 100/10, 250/25, 1000/100 Mbps pairs |
 | `has_0` | integer (as string) | Population with zero providers at this speed |
 | `has_1` | integer (as string) | Population with exactly one provider |
 | `has_2` | integer (as string) | Population with exactly two providers |
 | `has_3more` | integer (as string) | Population with three or more providers |
 
 Multiple rows per geography — one per `urban_rural` × `tribal_non` combination (4 combos max). Aggregate by summing across the relevant rows.
+
+`src/services/open-data/area-filters.ts` defines all 63 nonempty alphabetical technology combinations and the shared speed-pair descriptions. Area tools default to `acfow`, excluding satellite; explicit `acfosw` retains the all-technology view. The geography summary resource remains fixed at satellite-inclusive `acfosw` and 25/3 Mbps. These historical population aggregates do not establish current address service or BEAD eligibility, and the 100/10 tier cannot establish 100/20 availability.
 
 ### Deployment Table Schema (`jdr4-3q4p`)
 
@@ -321,7 +334,7 @@ Tech codes: 0 = All other, 10–12 = DSL (ADSL, ADSL2, VDSL), 20 = DSL (symmetri
 | 2 | `fcc_search_availability` | Query providers for that census block |
 | 3 | `fcc_get_coverage_summary` | Get county-level context (how does this area compare to its peers?) |
 
-### "Find rural counties for BEAD funding analysis" (digital divide chain)
+### "Find rural counties with historical broadband gaps" (digital divide chain)
 
 | # | Tool / Chain | Purpose |
 |:--|:-------------|:--------|
@@ -342,7 +355,7 @@ Tech codes: 0 = All other, 10–12 = DSL (ADSL, ADSL2, VDSL), 20 = DSL (symmetri
 
 ## Design Decisions
 
-**Geography discovery stays live and vintage-bound.** `fcc_search_geographies` queries `v5vt-e7vw` with text `year='2021'`, `contains(upper(name), ...)`, escaped SQL literals and LIKE metacharacters, grouping by type/GEOID/name and ordering by name/type/GEOID. The mirror drops year and cannot select this vintage. One extra row determines continuation without a count query. Distinct named matches survive; no state filter is exposed because CBSA codes and name suffixes cannot establish exhaustive state membership.
+**Geography discovery and names stay live and vintage-bound.** `fcc_search_geographies` queries all six non-national types in `v5vt-e7vw` with text `year='2021'`, `contains(upper(name), ...)`, escaped SQL literals and LIKE metacharacters, grouping by type/GEOID/name and ordering by name/type/GEOID. Single and batch name resolution select the same year. The mirror drops year and cannot supply these names; its existing stores remain usable for coverage. One extra discovery row determines continuation without a count query. Distinct named matches survive; no state filter is exposed because CBSA codes and name suffixes cannot establish exhaustive state membership.
 
 **National identity is local.** `getGeographyName('nation', ...)` returns `United States` before any mirror or network read because the lookup has no nation row. Coverage and the geography resource retain the Area Table's required `id='0'`; non-national names remain optional and fail-soft.
 
@@ -372,7 +385,7 @@ Tech codes: 0 = All other, 10–12 = DSL (ADSL, ADSL2, VDSL), 20 = DSL (symmetri
 
 ## Known Limitations
 
-- **Data ceiling at June 2021 for no-auth queries.** Form 477 data on Socrata tops out at June 2021. BDC (post-2022) is available via authenticated download API only as bulk CSVs, not row-queryable. All coverage analysis reflects ISP-reported availability as of ~3 years ago.
+- **Data ceiling at June 2021 for no-auth queries.** Form 477 analysis uses the June 2021 filing. BDC (post-2022) is available via authenticated download API only as bulk CSVs, not row-queryable. Coverage analysis is historical evidence, not current location eligibility.
 - **Census block granularity in Form 477.** Coverage is reported at the census block level. A provider reporting a block as "served" may not serve every address within it — over-reporting is a known Form 477 methodology limitation that BDC's location-level Fabric was designed to address.
 - **No mobile broadband in Form 477 Open Data.** The FCC Open Data portal has only fixed broadband deployment from Form 477. Mobile coverage (4G/5G by H3 hexagon) is BDC-only and requires auth.
 - **No address-level queries via public API.** Programmatic address → provider lookup requires geocode → census block → deployment table. The FCC's direct address lookup endpoint requires session auth not supported by the public API token system.

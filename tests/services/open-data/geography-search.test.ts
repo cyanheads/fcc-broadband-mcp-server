@@ -18,6 +18,44 @@ const service = () =>
 describe('geography lookup', () => {
   afterEach(() => vi.unstubAllGlobals());
 
+  it('keeps empty name batches local and absent single names unknown', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(Response.json([]));
+    vi.stubGlobal('fetch', fetchMock);
+    const svc = service();
+    expect(await svc.getGeographyNames('cbsa', [], createMockContext())).toEqual(new Map());
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(await svc.getGeographyName('cbsa', '99999', createMockContext())).toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('pins single and batched names to 2021 before historical rows can overwrite them', async () => {
+    const current = [
+      { type: 'cbsa', geoid: '10540', name: 'Albany-Lebanon, OR' },
+      { type: 'cbsa', geoid: '12420', name: 'Austin-Round Rock-Georgetown, TX' },
+    ];
+    const fetchMock = vi.fn((url: string) => {
+      const params = new URL(url).searchParams;
+      const rows = params.get('$where')?.includes("year='2021'")
+        ? current
+        : [...current, { type: 'cbsa', geoid: '10540', name: 'Albany, OR' }];
+      return Promise.resolve(Response.json(params.get('$limit') === '1' ? rows.slice(0, 1) : rows));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const svc = service();
+    expect(await svc.getGeographyName('cbsa', '10540', createMockContext())).toBe(
+      'Albany-Lebanon, OR',
+    );
+    expect(await svc.getGeographyNames('cbsa', ['10540', '12420'], createMockContext())).toEqual(
+      new Map([
+        ['10540', 'Albany-Lebanon, OR'],
+        ['12420', 'Austin-Round Rock-Georgetown, TX'],
+      ]),
+    );
+    for (const [url] of fetchMock.mock.calls) {
+      expect(new URL(url).searchParams.get('$where')).toContain("year='2021'");
+    }
+  });
+
   it('resolves a known non-national GEOID and leaves absent names unknown', async () => {
     const fetchMock = vi
       .fn()
@@ -33,7 +71,7 @@ describe('geography lookup', () => {
       service().getGeographyName('state', '99', createMockContext()),
     ).resolves.toBeUndefined();
     const url = new URL(fetchMock.mock.calls[0]![0]);
-    expect(url.searchParams.get('$where')).toBe("geoid='5613150' AND type='place'");
+    expect(url.searchParams.get('$where')).toBe("year='2021' AND geoid='5613150' AND type='place'");
     expect(url.searchParams.get('$limit')).toBe('1');
   });
 
@@ -56,7 +94,7 @@ describe('geography lookup', () => {
     const url = new URL(fetchMock.mock.calls[0]![0]);
     expect(url.pathname).toBe('/resource/v5vt-e7vw.json');
     expect(url.searchParams.get('$where')).toBe(
-      "year='2021' AND type in ('place','cbsa') AND contains(upper(name),'CASPER')",
+      "year='2021' AND type in ('state','county','cd','place','cbsa','tribal') AND contains(upper(name),'CASPER')",
     );
     expect(url.searchParams.get('$group')).toBe('type,geoid,name');
     expect(url.searchParams.get('$order')).toBe('name,type,geoid');
@@ -78,7 +116,7 @@ describe('geography lookup', () => {
     ).resolves.toEqual({ geographies: [] });
     const where = new URL(fetchMock.mock.calls[0]![0]).searchParams.get('$where');
     expect(where).toBe(
-      `year='2021' AND type in ('place','cbsa') AND contains(upper(name),'${escaped}')`,
+      `year='2021' AND type in ('state','county','cd','place','cbsa','tribal') AND contains(upper(name),'${escaped}')`,
     );
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
@@ -120,12 +158,14 @@ describe('geography lookup', () => {
   });
 
   it('keeps search live with the mirror enabled and applies the optional type filter', async () => {
-    const geographyName = vi.fn();
+    const mirrorRead = vi.fn(() => {
+      throw new Error('unexpected mirror read');
+    });
     const svc = new OpenDataService(
       {} as AppConfig,
       {} as StorageService,
       { mirrorEnabled: true, mirrorPath: 'unused' },
-      { geographyName } as unknown as Form477Mirror,
+      new Proxy({} as Form477Mirror, { get: mirrorRead }),
     );
     const fetchMock = vi.fn().mockResolvedValue(Response.json([]));
     vi.stubGlobal('fetch', fetchMock);
@@ -138,7 +178,7 @@ describe('geography lookup', () => {
     const params = new URL(fetchMock.mock.calls[0]![0]).searchParams;
     expect(params.get('$where')).toContain("type='cbsa'");
     expect(params.get('$limit')).toBe('101');
-    expect(geographyName).not.toHaveBeenCalled();
+    expect(mirrorRead).not.toHaveBeenCalled();
   });
 
   it('fails explicitly on a sparse match instead of inventing an identifier or name', async () => {
@@ -152,7 +192,9 @@ describe('geography lookup', () => {
   });
 
   it('names the nation locally before consulting either mirror or network', async () => {
-    const geographyName = vi.fn().mockRejectedValue(new Error('mirror unavailable'));
+    const mirrorRead = vi.fn(() => {
+      throw new Error('unexpected mirror read');
+    });
     const fetchMock = vi
       .fn()
       .mockResolvedValue(new Response('network unavailable', { status: 403 }));
@@ -161,12 +203,12 @@ describe('geography lookup', () => {
       {} as AppConfig,
       {} as StorageService,
       { mirrorEnabled: true, mirrorPath: 'unused' },
-      { geographyName } as unknown as Form477Mirror,
+      new Proxy({} as Form477Mirror, { get: mirrorRead }),
     );
     await expect(svc.getGeographyName('nation', '0', createMockContext())).resolves.toBe(
       'United States',
     );
-    expect(geographyName).not.toHaveBeenCalled();
+    expect(mirrorRead).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });

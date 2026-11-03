@@ -90,11 +90,119 @@ const SORT_STATS = [
 ];
 
 describe('compareAreasTool', () => {
+  it('discloses unmatched, duplicate and excluded IDs on both surfaces', async () => {
+    mockGetAreaStatsBatch.mockResolvedValue([{ ...MOCK_STATS[0], id: '00000' }]);
+    const ids = Array.from({ length: 301 }, (_, i) => String(i).padStart(5, '0'));
+    const result = await runToolContract(compareAreasTool, {
+      geography_type: 'county',
+      geography_ids: [...ids, '00000'],
+    });
+    expect(result.isError).not.toBe(true);
+    expect(result.structuredContent).toMatchObject({
+      unmatchedIds: ids.slice(1, 300),
+      excludedIds: ['00300'],
+      duplicateIds: ['00000'],
+    });
+    const text = JSON.stringify(result.content);
+    for (const value of ['00300', '00299', 'Duplicate', 'Excluded', 'Unmatched'])
+      expect(text).toContain(value);
+    for (const fragment of [
+      'Unmatched retained IDs (299):',
+      'Excluded unqueried IDs (1): 00300.',
+      'Duplicate IDs (1): 00000.',
+    ]) {
+      expect(result.structuredContent).toHaveProperty('notice', expect.stringContaining(fragment));
+      expect(text).toContain(fragment);
+    }
+    expect(mockGetAreaStatsBatch).toHaveBeenCalledWith(
+      expect.objectContaining({ geographyIds: ids.slice(0, 300) }),
+      expect.anything(),
+    );
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     mockGetAreaStatsBatch.mockResolvedValue(MOCK_STATS);
     mockGetGeographyNames.mockResolvedValue(new Map());
   });
+
+  it.each([51, 300])('accepts %i distinct IDs without excluding any', async (count) => {
+    const ids = Array.from({ length: count }, (_, i) => String(i).padStart(5, '0'));
+    mockGetAreaStatsBatch.mockResolvedValue(ids.map((id) => ({ ...MOCK_STATS[0], id })));
+    const result = await runToolContract(compareAreasTool, {
+      geography_type: 'county',
+      geography_ids: ids,
+    });
+    expect(result.isError).not.toBe(true);
+    expect(result.structuredContent).toMatchObject({
+      totalAreas: count,
+      unmatchedIds: [],
+      excludedIds: [],
+      duplicateIds: [],
+    });
+    expect(JSON.stringify(result.content)).toContain(ids.at(-1));
+  });
+
+  it('includes missing and unqueried diagnostics when every retained ID is unmatched', async () => {
+    mockGetAreaStatsBatch.mockResolvedValue([]);
+    const ids = Array.from({ length: 301 }, (_, i) => String(i).padStart(5, '0'));
+    const result = await runToolContract(compareAreasTool, {
+      geography_type: 'county',
+      geography_ids: ids,
+    });
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toMatchObject({
+      error: {
+        data: { reason: 'no_data_found', unmatchedIds: ids.slice(0, 300), excludedIds: ['00300'] },
+      },
+    });
+    expect(JSON.stringify(result.content)).toContain('Unmatched');
+    expect(JSON.stringify(result.content)).toContain('00300');
+  });
+
+  it('wires terrestrial default and new combinations through both surfaces', async () => {
+    const result = await runToolContract(compareAreasTool, {
+      geography_type: 'state',
+      geography_ids: ['28', '01'],
+    });
+    expect(result.structuredContent).toMatchObject({ techFilter: 'acfow' });
+    expect(JSON.stringify(result.content)).toContain('acfow');
+    expect(mockGetAreaStatsBatch).toHaveBeenCalledWith(
+      expect.objectContaining({ techFilter: 'acfow' }),
+      expect.anything(),
+    );
+    const combined = await runToolContract(compareAreasTool, {
+      geography_type: 'state',
+      geography_ids: ['28', '01'],
+      tech_filter: 'cf',
+    });
+    expect(combined.structuredContent).toMatchObject({ techFilter: 'cf' });
+    expect(JSON.stringify(combined.content)).toContain('cf');
+    expect(mockGetAreaStatsBatch).toHaveBeenLastCalledWith(
+      expect.objectContaining({ techFilter: 'cf' }),
+      expect.anything(),
+    );
+  });
+
+  it.each(['abort', 'caller'])(
+    'rethrows optional-name cancellation at the handler seam: %s',
+    async (kind) => {
+      const controller = new AbortController();
+      const error =
+        kind === 'abort'
+          ? new DOMException('cancelled', 'AbortError')
+          : new Error('caller stopped');
+      mockGetGeographyNames.mockImplementation(() => {
+        if (kind === 'caller') controller.abort(error);
+        return Promise.reject(error);
+      });
+      await expect(
+        compareAreasTool.handler(
+          compareAreasTool.input.parse({ geography_type: 'state', geography_ids: ['28', '01'] }),
+          createMockContext({ errors: compareAreasTool.errors, signal: controller.signal }),
+        ),
+      ).rejects.toBe(error);
+    },
+  );
 
   it('returns ranked areas for a list of geography IDs', async () => {
     const ctx = createMockContext({ errors: compareAreasTool.errors });
@@ -309,6 +417,9 @@ describe('compareAreasTool', () => {
 
   it('formats output with rank, oneProvider, twoProviders, threeOrMore columns', () => {
     const output = {
+      unmatchedIds: [],
+      excludedIds: [],
+      duplicateIds: [],
       geographyType: 'state',
       techFilter: 'acfosw',
       speedDownMbps: 25,
@@ -345,6 +456,9 @@ describe('compareAreasTool', () => {
     /** Minimal output carrying one row, ranked by `sortBy`. */
     function outputSortedBy(sortBy: string) {
       return {
+        unmatchedIds: [],
+        excludedIds: [],
+        duplicateIds: [],
         geographyType: 'state',
         techFilter: 'acfosw',
         speedDownMbps: 25,

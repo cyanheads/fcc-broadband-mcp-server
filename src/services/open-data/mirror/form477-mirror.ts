@@ -70,7 +70,6 @@ export class Form477Mirror {
   readonly #stores: Form477Stores;
   readonly #coveredStates = new Set<string>();
   #full = false;
-  #geographyReady = false;
 
   constructor(dir: string) {
     this.#stores = createForm477Stores(dir);
@@ -112,13 +111,6 @@ export class Form477Mirror {
   #geoCovered(type: string, id: string): Promise<boolean> {
     if (typeEmbedsState(type)) return this.#stateCovered(id.slice(0, 2));
     return this.#fullCorpus();
-  }
-
-  async #geographyTableReady(): Promise<boolean> {
-    if (this.#geographyReady) return true;
-    const state = await this.#stores.geography.readState();
-    this.#geographyReady = state.completedAt != null;
-    return this.#geographyReady;
   }
 
   // -------------------------------------------------------------------------
@@ -263,6 +255,7 @@ export class Form477Mirror {
     state?: string;
     techCodes?: string[];
     rowLimit: number;
+    signal?: AbortSignal;
   }): Promise<RawProviderRow[] | undefined> {
     if (!(await this.#fullCorpus())) return;
     const filters: QueryFilter[] = [];
@@ -271,27 +264,35 @@ export class Form477Mirror {
       filters.push({ column: 'techcode', op: 'in', value: options.techCodes });
     }
     const match = options.nameSearch ? ftsPrefixQuery(options.nameSearch) : undefined;
-    const { rows } = await this.#stores.providerDim.query({
-      ...(match ? { match } : {}),
-      filters,
-      limit: options.rowLimit,
-      offset: 0,
-    });
-    return rows.map((r) =>
-      compact({
-        hoconum: str(r.hoconum),
-        holdingcompanyname: str(r.holdingcompanyname),
-        stateabbr: str(r.stateabbr),
-        techcode: str(r.techcode),
-      }),
-    );
+    const records: RawProviderRow[] = [];
+    for (let offset = 0; ; offset += options.rowLimit) {
+      options.signal?.throwIfAborted();
+      const { rows, total } = await this.#stores.providerDim.query({
+        ...(match ? { match } : {}),
+        filters,
+        limit: options.rowLimit,
+        offset,
+        sort: { column: 'combo', direction: 'asc' },
+      });
+      records.push(
+        ...rows.map((r) =>
+          compact({
+            hoconum: str(r.hoconum),
+            holdingcompanyname: str(r.holdingcompanyname),
+            stateabbr: str(r.stateabbr),
+            techcode: str(r.techcode),
+          }),
+        ),
+      );
+      if (offset + rows.length >= total) break;
+    }
+    return records;
   }
 
   /**
    * Every state and technology each holding company filed under, one indexed
-   * `hoconum` lookup at a time. {@link searchProviders} returns a bounded
-   * window of dimension rows, so the states and technologies visible inside
-   * that window are a subset of each company's footprint — this reads the whole
+   * `hoconum` lookup at a time. {@link searchProviders} filters dimension rows,
+   * so their states and technologies are a subset of each company's footprint — this reads the whole
    * footprint per company instead. A company spans at most a few hundred
    * state × technology combinations, well inside the store's row ceiling.
    *
@@ -363,55 +364,6 @@ export class Form477Mirror {
       }),
     );
     return { holdingCompanyName, summaryRows };
-  }
-
-  /**
-   * Geography name lookup. The outer `undefined` means serve live; the inner
-   * `value` may itself be undefined when the mirror authoritatively has no name
-   * for the GEOID (matching the live API's empty result).
-   */
-  async geographyName(
-    type: string,
-    geoId: string,
-  ): Promise<{ value: string | undefined } | undefined> {
-    if (!(await this.#geographyTableReady())) return;
-    if (!(await this.#geoCovered(type, geoId))) return;
-    const { rows } = await this.#stores.geography.query({
-      filters: [
-        { column: 'geoid', op: 'eq', value: geoId },
-        { column: 'type', op: 'eq', value: type },
-      ],
-      limit: 1,
-      offset: 0,
-    });
-    return { value: str(rows[0]?.name) };
-  }
-
-  async geographyNames(type: string, ids: string[]): Promise<Map<string, string> | undefined> {
-    if (!(await this.#geographyTableReady())) return;
-    if (typeEmbedsState(type)) {
-      const prefixes = new Set(ids.map((id) => id.slice(0, 2)));
-      for (const fips of prefixes) {
-        if (!(await this.#stateCovered(fips))) return;
-      }
-    } else if (!(await this.#fullCorpus())) {
-      return;
-    }
-    const { rows } = await this.#stores.geography.query({
-      filters: [
-        { column: 'type', op: 'eq', value: type },
-        { column: 'geoid', op: 'in', value: ids },
-      ],
-      limit: MAX_SCAN_ROWS,
-      offset: 0,
-    });
-    const names = new Map<string, string>();
-    for (const r of rows) {
-      const geoid = str(r.geoid);
-      const name = str(r.name);
-      if (geoid && name) names.set(geoid, name);
-    }
-    return names;
   }
 }
 

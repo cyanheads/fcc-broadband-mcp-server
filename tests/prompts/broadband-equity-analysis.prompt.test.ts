@@ -7,6 +7,16 @@ import { describe, expect, it } from 'vitest';
 import { broadbandEquityAnalysisPrompt as prompt } from '@/mcp-server/prompts/definitions/broadband-equity-analysis.prompt.js';
 
 describe('broadband_equity_analysis', () => {
+  it('uses historical population screening without inferring eligibility or address service', async () => {
+    const messages = await prompt.generate(prompt.args!.parse({ region: 'MS', focus: 'all' }));
+    const content = messages[0]!.content;
+    if (content.type !== 'text') throw new Error('Expected text prompt');
+    expect(content.text).toContain('acfow');
+    expect(content.text).toContain('100/10');
+    expect(content.text).toContain('all fixed wireless');
+    expect(content.text).toContain('cannot establish current BEAD eligibility or address service');
+    expect(content.text).not.toContain('Identify BEAD-eligible locations');
+  });
   it.each([
     ['underserved', 'Focus on areas with zero broadband providers'],
     ['rural', 'Focus on rural vs. urban broadband disparities'],

@@ -32,10 +32,8 @@ import {
 export const MAX_SCAN_ROWS = 50_000;
 
 /**
- * Provider-dimension reads — `search_providers` reads 10 dimension rows per
- * result, capped at 200 results, then one whole-footprint read per returned
- * company (bounded by the columns' own domains at 56 jurisdictions × 10
- * technology codes).
+ * Provider-dimension page ceiling. Search drains matching pages before company
+ * pagination; returned companies each receive one national footprint lookup.
  */
 export const MAX_PROVIDER_SEARCH_ROWS = 2_000;
 

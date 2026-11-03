@@ -3,22 +3,40 @@
   "version": "0.3.0",
   "description": "Access FCC broadband availability, coverage analysis, and digital divide data for US geographies and census blocks via MCP. STDIO or Streamable HTTP.",
   "author": {
-    "name": "cyanheads",
+    "name": "Casey Hand",
     "email": "casey@caseyjhand.com",
     "url": "https://caseyjhand.com"
   },
   "homepage": "https://github.com/cyanheads/fcc-broadband-mcp-server#readme",
   "repository": "https://github.com/cyanheads/fcc-broadband-mcp-server",
   "license": "Apache-2.0",
-  "keywords": ["mcp", "mcp-server", "model-context-protocol", "fcc", "broadband", "digital-divide"],
+  "keywords": [
+    "mcp",
+    "mcp-server",
+    "model-context-protocol",
+    "typescript",
+    "bun",
+    "stdio",
+    "streamable-http",
+    "fcc",
+    "broadband",
+    "internet-access",
+    "digital-divide",
+    "bead",
+    "census-block",
+    "broadband-equity",
+    "open-data"
+  ],
   "mcpServers": "./.codex-plugin/mcp.json",
   "interface": {
     "displayName": "fcc-broadband-mcp-server",
     "shortDescription": "Query FCC broadband availability, coverage analysis, and digital-divide data for US geographies and census blocks via MCP.",
-    "longDescription": "MCP server for FCC broadband data. Geocode coordinates to census blocks, query block-level provider availability and advertised speeds, and run geography-level coverage analysis — provider counts, unserved and underserved populations, area comparisons, and BEAD-eligibility lookups. Covers Form 477 (2015–2021) and Broadband Data Collection (2022+) datasets. STDIO and Streamable HTTP transports.",
+    "longDescription": "MCP server for FCC broadband data. Geocode coordinates to census blocks, query reported providers and advertised speeds, and compare geography-level coverage populations using the June 2021 Form 477 filing. Discover newer BDC bulk-file manifests with credentials. Historical population aggregates support gap research but do not establish current address service or funding eligibility. STDIO and Streamable HTTP transports.",
     "developerName": "cyanheads",
     "category": "government data",
-    "capabilities": ["Read"],
+    "capabilities": [
+      "Read"
+    ],
     "websiteURL": "https://github.com/cyanheads/fcc-broadband-mcp-server",
     "defaultPrompt": []
   }

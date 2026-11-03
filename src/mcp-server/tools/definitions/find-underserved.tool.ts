@@ -5,79 +5,19 @@
 
 import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
+import {
+  AREA_SPEED_DESCRIPTION,
+  AREA_TECH_DESCRIPTION,
+  AREA_TECH_FILTERS,
+} from '@/services/open-data/area-filters.js';
+import { STATE_ABBR_TO_FIPS } from '@/services/open-data/mirror/state-fips.js';
 import { getOpenDataService } from '@/services/open-data/open-data-service.js';
-
-/**
- * Maps USPS state and territory abbreviations to the 2-digit FIPS prefix used
- * to filter county/cd/place GEOIDs, in FIPS order. Membership here is the only
- * check on the `state` input beyond its two-uppercase-letter shape, so an
- * abbreviation missing from this map is rejected rather than silently dropped.
- * Form 477 covers the five inhabited territories alongside the states.
- */
-const STATE_ABBR_TO_FIPS: Record<string, string> = {
-  AL: '01',
-  AK: '02',
-  AZ: '04',
-  AR: '05',
-  CA: '06',
-  CO: '08',
-  CT: '09',
-  DE: '10',
-  DC: '11',
-  FL: '12',
-  GA: '13',
-  HI: '15',
-  ID: '16',
-  IL: '17',
-  IN: '18',
-  IA: '19',
-  KS: '20',
-  KY: '21',
-  LA: '22',
-  ME: '23',
-  MD: '24',
-  MA: '25',
-  MI: '26',
-  MN: '27',
-  MS: '28',
-  MO: '29',
-  MT: '30',
-  NE: '31',
-  NV: '32',
-  NH: '33',
-  NJ: '34',
-  NM: '35',
-  NY: '36',
-  NC: '37',
-  ND: '38',
-  OH: '39',
-  OK: '40',
-  OR: '41',
-  PA: '42',
-  RI: '44',
-  SC: '45',
-  SD: '46',
-  TN: '47',
-  TX: '48',
-  UT: '49',
-  VT: '50',
-  VA: '51',
-  WA: '53',
-  WV: '54',
-  WI: '55',
-  WY: '56',
-  AS: '60',
-  GU: '66',
-  MP: '69',
-  PR: '72',
-  VI: '78',
-};
 
 export const findUnderservedTool = tool('fcc_find_underserved', {
   title: 'Find Underserved Areas',
   description:
     'Finds geographic areas with limited or no broadband coverage at a given speed threshold, ranked by unserved population. ' +
-    'The core tool for BEAD program analysis and broadband equity research. ' +
+    'Supports historical population screening and broadband equity research; it cannot establish current BEAD eligibility or address service. ' +
     'Accepts a state abbreviation to narrow scope or runs nationwide. ' +
     'Defaults to rural areas where underservice is most concentrated. ' +
     'Data is from FCC Form 477 (as of June 2021).',
@@ -95,20 +35,13 @@ export const findUnderservedTool = tool('fcc_find_underserved', {
       .enum(['county', 'cd', 'place', 'cbsa'])
       .default('county')
       .describe(
-        'Geographic granularity for results. "county" is most useful for policy analysis and BEAD eligibility. "cd" = congressional district. "place" = census-designated place. "cbsa" = metro area.',
+        'Geographic granularity for historical population screening. "county" = county. "cd" = congressional district. "place" = census-designated place. "cbsa" = metro area.',
       ),
     speed_down: z
       .enum(['0.2', '4', '10', '25', '100', '250', '1000'])
       .default('25')
-      .describe(
-        'Download speed threshold in Mbps for defining "underserved." 25 = FCC legacy standard. 100 = BEAD program standard.',
-      ),
-    tech_filter: z
-      .enum(['acfosw', 'f', 'c', 'a', 'o', 's', 'w'])
-      .default('acfosw')
-      .describe(
-        'Technology filter, one value: "acfosw" = every technology (default). "f" = fiber, "c" = cable, "a" = ADSL/DSL, "o" = other (symmetric DSL, other copper, power line), "s" = satellite, "w" = fixed wireless.',
-      ),
+      .describe(AREA_SPEED_DESCRIPTION),
+    tech_filter: z.enum(AREA_TECH_FILTERS).default('acfow').describe(AREA_TECH_DESCRIPTION),
     min_unserved_pop: z
       .number()
       .int()
@@ -123,6 +56,12 @@ export const findUnderservedTool = tool('fcc_find_underserved', {
       .describe(
         'Defaults to rural ("R") — where underservice is most concentrated. Use "U" to find underserved urban areas (digital redlining research). Set to "all" for both.',
       ),
+    offset: z
+      .number()
+      .int()
+      .min(0)
+      .default(0)
+      .describe('Number of globally ranked matching areas to skip.'),
     limit: z
       .number()
       .int()
@@ -133,6 +72,8 @@ export const findUnderservedTool = tool('fcc_find_underserved', {
   }),
 
   output: z.object({
+    offset: z.number().describe('Number of ranked matching areas skipped.'),
+    nextOffset: z.number().optional().describe('Next offset when another ranked page remains.'),
     areas: z
       .array(
         z
@@ -268,7 +209,7 @@ export const findUnderservedTool = tool('fcc_find_underserved', {
 
     // A code the map doesn't know can't be turned into a filter, and dropping
     // it would answer a nationwide query the caller never asked for.
-    const stateFipsPrefix = input.state ? STATE_ABBR_TO_FIPS[input.state] : undefined;
+    const stateFipsPrefix = input.state ? STATE_ABBR_TO_FIPS.get(input.state) : undefined;
     if (input.state && stateFipsPrefix === undefined) {
       throw ctx.fail(
         'unknown_state',
@@ -276,6 +217,10 @@ export const findUnderservedTool = tool('fcc_find_underserved', {
       );
     }
     const service = getOpenDataService();
+    const requestCtx = {
+      ...ctx,
+      signal: AbortSignal.any([ctx.signal, AbortSignal.timeout(48_000)]),
+    };
     // The scan reads every matching row it can; the caller-facing `limit` trims
     // the ranked list afterwards and never bounds the data the ranking sees.
     const scan = await service.getAreaStatsByType(
@@ -286,16 +231,18 @@ export const findUnderservedTool = tool('fcc_find_underserved', {
         urbanRuralFilter: input.urban_rural_filter,
         ...(stateFipsPrefix !== undefined ? { stateFipsPrefix } : {}),
       },
-      ctx,
+      requestCtx,
     );
 
     const filtered = scan.stats.filter((s) => s.noCoverage >= input.min_unserved_pop);
 
     // Sort by unserved population descending
-    filtered.sort((a, b) => b.noCoverage - a.noCoverage);
+    filtered.sort((a, b) => b.noCoverage - a.noCoverage || a.id.localeCompare(b.id));
 
     const totalFound = filtered.length;
-    const limited = filtered.slice(0, input.limit);
+    const limited = filtered.slice(input.offset, input.offset + input.limit);
+    const nextOffset =
+      input.offset + limited.length < totalFound ? input.offset + limited.length : undefined;
 
     const appliedFilters = {
       ...(input.state && { state: input.state }),
@@ -316,10 +263,10 @@ export const findUnderservedTool = tool('fcc_find_underserved', {
      * routes through it too, last-wins), so compose one string and emit it once.
      */
     const notices: string[] = [];
-    const listTruncated = totalFound > input.limit;
+    const listTruncated = nextOffset !== undefined;
     if (listTruncated) {
       notices.push(
-        `Showing the top ${limited.length} of ${totalFound} matching areas — raise limit or narrow the filters to see more.`,
+        `Showing ${input.offset === 0 ? 'the top ' : ''}${limited.length} of ${totalFound} matching areas. Continue with offset=${nextOffset} and the same filters.`,
       );
     }
     if (scan.scanTruncated) {
@@ -335,7 +282,11 @@ export const findUnderservedTool = tool('fcc_find_underserved', {
         `${fullyCovered} of the ${limited.length} returned areas have no unserved population at ${input.speed_down} Mbps — they are fully covered and rank only because min_unserved_pop is 0. Set min_unserved_pop to 1 to drop them, or raise speed_down to find gaps at a higher threshold.`,
       );
     }
-    if (limited.length === 0) {
+    if (limited.length === 0 && totalFound > 0) {
+      notices.push(
+        `This page is exhausted at offset=${input.offset}; ${totalFound} areas matched the filters.`,
+      );
+    } else if (limited.length === 0) {
       notices.push(
         `No areas found with the current filters. Try lowering min_unserved_pop or setting urban_rural_filter to "all".${
           input.state !== undefined ? ` Dropping state="${input.state}" searches nationwide.` : ''
@@ -351,6 +302,7 @@ export const findUnderservedTool = tool('fcc_find_underserved', {
 
     if (limited.length === 0) {
       return {
+        offset: input.offset,
         areas: [],
         geographyType: input.geography_type,
         speedDownMbps: parseFloat(input.speed_down),
@@ -359,15 +311,18 @@ export const findUnderservedTool = tool('fcc_find_underserved', {
       };
     }
 
-    // Resolve GEOIDs to names for the returned rows only (post-ranking, post-limit)
-    // in one batched lookup; a resolution failure never fails the call.
+    /** Resolve names only after ranking and limiting; unavailable names may be omitted, but caller cancellation ends the call. */
     const names = await service
       .getGeographyNames(
         input.geography_type,
         limited.map((s) => s.id),
-        ctx,
+        requestCtx,
       )
-      .catch(() => new Map<string, string>());
+      .catch((error: unknown) => {
+        if (ctx.signal.aborted || (error instanceof Error && error.name === 'AbortError'))
+          throw error;
+        return new Map<string, string>();
+      });
 
     const areas = limited.map((s, i) => {
       const coveragePct = s.total > 0 ? ((s.total - s.noCoverage) / s.total) * 100 : 0;
@@ -376,7 +331,7 @@ export const findUnderservedTool = tool('fcc_find_underserved', {
       return {
         id: s.id,
         ...(name && { name }),
-        rank: i + 1,
+        rank: input.offset + i + 1,
         noCoverage: s.noCoverage,
         oneProvider: s.oneProvider,
         total: s.total,
@@ -391,6 +346,8 @@ export const findUnderservedTool = tool('fcc_find_underserved', {
     });
 
     return {
+      offset: input.offset,
+      ...(nextOffset !== undefined && { nextOffset }),
       areas,
       geographyType: input.geography_type,
       speedDownMbps: parseFloat(input.speed_down),
@@ -407,10 +364,16 @@ export const findUnderservedTool = tool('fcc_find_underserved', {
       `## Underserved Areas — ${result.geographyType} level`,
       `**Speed Threshold:** ${result.speedDownMbps} Mbps | **Area Filter:** ${urLabel} (${result.urbanRuralFilter}) | **Data Vintage:** ${result.dataVintage}`,
       `**Shown:** ${result.areas.length}`,
+      `**Offset:** ${result.offset}`,
+      ...(result.nextOffset !== undefined ? [`**Next offset:** ${result.nextOffset}`] : []),
     ];
 
     if (result.areas.length === 0) {
-      lines.push('\nNo underserved areas found with current filters.');
+      lines.push(
+        result.offset > 0
+          ? '\nThis page is exhausted.'
+          : '\nNo underserved areas found with current filters.',
+      );
     } else {
       lines.push(
         '',

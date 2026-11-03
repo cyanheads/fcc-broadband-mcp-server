@@ -40,6 +40,37 @@ describe('geographySummaryResource', () => {
     mockGetGeographyName.mockResolvedValue('Mississippi');
   });
 
+  it('describes its fixed satellite-inclusive threshold and preserves its query', async () => {
+    expect(geographySummaryResource.description).toContain('25/3');
+    expect(geographySummaryResource.description).toContain('satellite');
+    await geographySummaryResource.handler({ type: 'state', id: '28' }, createMockContext());
+    expect(mockGetAreaSegments).toHaveBeenCalledWith(
+      expect.objectContaining({ techFilter: 'acfosw', speedDown: '25' }),
+      expect.anything(),
+    );
+  });
+
+  it.each(['abort', 'caller'])(
+    'rethrows optional-name cancellation at the handler seam: %s',
+    async (kind) => {
+      const controller = new AbortController();
+      const error =
+        kind === 'abort'
+          ? new DOMException('cancelled', 'AbortError')
+          : new Error('caller stopped');
+      mockGetGeographyName.mockImplementation(() => {
+        if (kind === 'caller') controller.abort(error);
+        return Promise.reject(error);
+      });
+      await expect(
+        geographySummaryResource.handler(
+          { type: 'state', id: '28' },
+          createMockContext({ signal: controller.signal }),
+        ),
+      ).rejects.toBe(error);
+    },
+  );
+
   // Happy path — state
   it('returns coverage summary for a state geography', async () => {
     const ctx = createMockContext();

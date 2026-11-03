@@ -71,6 +71,11 @@ export const STATE_FIPS_TO_ABBR: Readonly<Record<string, string>> = {
 /** All state FIPS codes in the corpus, ascending — the full-ingest roster. */
 export const ALL_STATE_FIPS: readonly string[] = Object.keys(STATE_FIPS_TO_ABBR).sort();
 
+/** USPS abbreviation → FIPS membership, derived from the Form 477 roster. */
+export const STATE_ABBR_TO_FIPS: ReadonlyMap<string, string> = new Map(
+  Object.entries(STATE_FIPS_TO_ABBR).map(([fips, abbreviation]) => [abbreviation, fips]),
+);
+
 /** Whether `fips` is a valid 2-digit state FIPS present in the corpus. */
 export function isStateFips(fips: string): boolean {
   return Object.hasOwn(STATE_FIPS_TO_ABBR, fips);

@@ -292,6 +292,79 @@ describe('disabled passthrough', () => {
 });
 
 describe('mirror-failure fallback', () => {
+  it('does not fall back to live after cancellation between provider dimension pages', async () => {
+    await markCovered(mirror.stores.deployment, FULL_SCOPE);
+    await mirror.stores.providerDim.applyBatch(
+      Array.from({ length: 2001 }, (_, i) => ({
+        combo: `cancel-${i}`,
+        hoconum: String(900000 + i),
+        holdingcompanyname: 'Cancellation Fixture',
+        stateabbr: 'WA',
+        techcode: '50',
+      })),
+      [],
+    );
+    const caller = new AbortController();
+    const original = mirror.stores.providerDim.query.bind(mirror.stores.providerDim);
+    const query = vi
+      .spyOn(mirror.stores.providerDim, 'query')
+      .mockImplementation(async (options) => {
+        const result = await original(options);
+        caller.abort(new DOMException('Cancelled', 'AbortError'));
+        return result;
+      });
+    try {
+      await expect(
+        makeService(mirror).searchProviders(
+          { nameSearch: 'Cancellation' },
+          createMockContext({ signal: caller.signal }),
+        ),
+      ).rejects.toMatchObject({ name: 'AbortError' });
+      expect(query).toHaveBeenCalledTimes(1);
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      query.mockRestore();
+    }
+  });
+  it('drains more than 2000 provider combinations before stable company paging', async () => {
+    await markCovered(mirror.stores.deployment, FULL_SCOPE);
+    await mirror.stores.providerDim.applyBatch(
+      Array.from({ length: 2401 }, (_, i) => ({
+        combo: `paging-${String(i).padStart(5, '0')}`,
+        hoconum: String(900000 + Math.floor(i / 3)),
+        holdingcompanyname: 'Paging Fixture',
+        stateabbr: ['WA', 'OR', 'PR'][i % 3]!,
+        techcode: '50',
+      })),
+      [],
+    );
+    const service = makeService(mirror);
+    const first = await service.searchProviders({ nameSearch: 'Paging', limit: 200 }, ctx);
+    expect(first.matched).toBe(801);
+    expect(first.scanTruncated).toBe(false);
+    const second = await service.searchProviders(
+      { nameSearch: 'Paging', limit: 200, offset: 200 },
+      ctx,
+    );
+    expect(second.providers[0]?.hoconum).toBe('900200');
+    expect(second.providers[0]?.statesServed).toEqual(['OR', 'PR', 'WA']);
+    const last = await service.searchProviders(
+      { nameSearch: 'Paging', limit: 200, offset: 800 },
+      ctx,
+    );
+    expect(last.providers.map((p) => p.hoconum)).toEqual(['900800']);
+    const past = await service.searchProviders(
+      { nameSearch: 'Paging', limit: 200, offset: 801 },
+      ctx,
+    );
+    expect(past.providers).toEqual([]);
+    expect(past.matched).toBe(801);
+    const narrow = await service.searchProviders(
+      { nameSearch: 'Paging', limit: 1, offset: 200 },
+      ctx,
+    );
+    expect(narrow.providers).toEqual(second.providers.slice(0, 1));
+  });
   it('degrades to the live API when the mirror layer throws', async () => {
     const throwing = {
       deploymentByBlock: () => Promise.reject(new Error('SQLITE_CORRUPT')),
@@ -552,14 +625,36 @@ describe('provider aggregations (full-corpus gate)', () => {
 });
 
 describe('geography lookups', () => {
-  it('serves a covered-state geography name from the mirror', async () => {
+  it('bypasses populated yearless names while retaining mirrored coverage and stored geography data', async () => {
     const service = makeService(mirror);
+    fetchMock.mockResolvedValueOnce(
+      liveJson([{ geoid: '11001', type: 'county', name: 'Current DC' }]),
+    );
     const name = await service.getGeographyName('county', '11001', ctx);
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(name).toBe('District of Columbia, DC');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(name).toBe('Current DC');
+    expect(new URL(fetchMock.mock.calls[0]![0]).searchParams.get('$where')).toContain(
+      "year='2021'",
+    );
+    expect(
+      await service.getAreaSegments(
+        {
+          geographyType: 'county',
+          geographyId: '11001',
+          techFilter: 'acfosw',
+          speedDown: '25',
+        },
+        ctx,
+      ),
+    ).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const stored = await mirror.stores.geography.query({ limit: 10, offset: 0 });
+    expect(stored.rows).toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: 'District of Columbia, DC' })]),
+    );
   });
 
-  it('falls back live for an uncovered state and for non-embedded types', async () => {
+  it('reads names live for uncovered states and non-embedded types', async () => {
     const service = makeService(mirror);
     fetchMock.mockImplementation(() => Promise.resolve(liveJson([])));
     await service.getGeographyName('county', '56001', ctx);
@@ -567,15 +662,35 @@ describe('geography lookups', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it('serves a batch only when every id is covered', async () => {
+  it('keeps batches live regardless of mirror coverage', async () => {
     const service = makeService(mirror);
+    fetchMock.mockResolvedValueOnce(liveJson([{ geoid: '11001', name: 'Current DC' }]));
     const names = await service.getGeographyNames('county', ['11001'], ctx);
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(names.get('11001')).toBe('District of Columbia, DC');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(names.get('11001')).toBe('Current DC');
 
     fetchMock.mockResolvedValueOnce(liveJson([]));
     await service.getGeographyNames('county', ['11001', '56001'], ctx);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('discovers tribal names live with an existing geography store', async () => {
+    fetchMock.mockResolvedValueOnce(
+      liveJson([{ type: 'tribal', geoid: '2430R', name: 'Navajo Nation Reservation' }]),
+    );
+    const result = await makeService(mirror).searchGeographies(
+      { name: 'Navajo', geographyType: 'tribal', limit: 20, offset: 0 },
+      ctx,
+    );
+    expect(result).toEqual({
+      geographies: [
+        { geography_type: 'tribal', geography_id: '2430R', name: 'Navajo Nation Reservation' },
+      ],
+    });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(new URL(fetchMock.mock.calls[0]![0]).searchParams.get('$where')).toContain(
+      "year='2021'",
+    );
   });
 });
 
@@ -641,12 +756,6 @@ describe('store query ceilings', () => {
         maxRows: MAX_SCAN_ROWS,
       }),
     ).resolves.toEqual({ rows: [expect.objectContaining({ id: '11001' })], total: 1 });
-    await expect(mirror.geographyName('county', '11001')).resolves.toEqual({
-      value: 'District of Columbia, DC',
-    });
-    await expect(mirror.geographyNames('county', ['11001'])).resolves.toEqual(
-      new Map([['11001', 'District of Columbia, DC']]),
-    );
     await expect(mirror.providerSummary('130235')).resolves.toMatchObject({
       holdingCompanyName: 'Comcast Corporation',
     });

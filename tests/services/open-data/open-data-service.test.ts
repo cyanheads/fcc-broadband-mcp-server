@@ -35,6 +35,138 @@ function makeService(mirror?: Form477Mirror): OpenDataService {
 }
 
 describe('OpenDataService sparse upstream records', () => {
+  it.each(['single', 'batch'])(
+    'bounds optional %s name retries with one total deadline',
+    async (kind) => {
+      const budget = new AbortController();
+      const spy = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(budget.signal);
+      const fetchMock = vi.fn<typeof fetch>(async (_input, init) => {
+        budget.abort(new DOMException('Deadline', 'TimeoutError'));
+        init?.signal?.throwIfAborted();
+        throw new Error('Expected deadline abort');
+      });
+      vi.stubGlobal('fetch', fetchMock);
+      try {
+        const service = makeService();
+        const pending =
+          kind === 'single'
+            ? service.getGeographyName('county', '53033', createMockContext())
+            : service.getGeographyNames('county', ['53033', '53063'], createMockContext());
+        await expect(pending).rejects.toMatchObject({ name: 'TimeoutError' });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        expect(spy).toHaveBeenCalledWith(30_000);
+      } finally {
+        spy.mockRestore();
+      }
+    },
+  );
+  it.each([51, 300])(
+    'reads %i comparison IDs and names in sequential batches of at most 50',
+    async (count) => {
+      const ids = Array.from({ length: count }, (_, i) => String(i).padStart(5, '0'));
+      const lengths: number[] = [];
+      let active = 0;
+      let peak = 0;
+      const fetchMock = vi.fn<typeof fetch>(async (input) => {
+        active++;
+        peak = Math.max(active, peak);
+        const url = new URL(String(input));
+        const where = url.searchParams.get('$where')!;
+        const queried = ids.filter((id) => where.includes(`'${id}'`));
+        lengths.push(queried.length);
+        await Promise.resolve();
+        active--;
+        const rows = url.pathname.includes('v5vt-e7vw')
+          ? queried.map((id) => ({ geoid: id, name: `County ${id}` }))
+          : queried.flatMap((id) => [
+              { id, has_0: '2', has_1: '3' },
+              { id, has_0: '4', has_1: '5' },
+            ]);
+        return new Response(JSON.stringify(rows));
+      });
+      vi.stubGlobal('fetch', fetchMock);
+      const service = makeService();
+      const stats = await service.getAreaStatsBatch(
+        { geographyType: 'county', geographyIds: ids, techFilter: 'acfow', speedDown: '25' },
+        createMockContext(),
+      );
+      expect(stats).toHaveLength(count);
+      expect(stats.at(-1)).toMatchObject({ id: ids.at(-1), noCoverage: 6, total: 14 });
+      expect(await service.getGeographyNames('county', ids, createMockContext())).toEqual(
+        new Map(ids.map((id) => [id, `County ${id}`])),
+      );
+      expect(lengths).toEqual([
+        ...Array(Math.floor(count / 50)).fill(50),
+        ...(count % 50 ? [count % 50] : []),
+        ...Array(Math.floor(count / 50)).fill(50),
+        ...(count % 50 ? [count % 50] : []),
+      ]);
+      expect(peak).toBe(1);
+    },
+  );
+
+  it('does not return a partial comparison after a later failed batch', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response('[{"id":"00000","has_0":"1"}]'))
+      .mockResolvedValue(new Response('{}', { status: 400 }));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(
+      makeService().getAreaStatsBatch(
+        {
+          geographyType: 'county',
+          geographyIds: Array.from({ length: 51 }, (_, i) => String(i).padStart(5, '0')),
+          techFilter: 'acfow',
+          speedDown: '25',
+        },
+        createMockContext(),
+      ),
+    ).rejects.toBeInstanceOf(McpError);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('cancels between comparison batches without starting another read', async () => {
+    const caller = new AbortController();
+    const fetchMock = vi.fn(async () => {
+      caller.abort(new DOMException('Cancelled', 'AbortError'));
+      return new Response('[{"id":"00000","has_0":"1"}]');
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(
+      makeService().getAreaStatsBatch(
+        {
+          geographyType: 'county',
+          geographyIds: Array.from({ length: 51 }, (_, i) => String(i).padStart(5, '0')),
+          techFilter: 'acfow',
+          speedDown: '25',
+        },
+        createMockContext({ signal: caller.signal }),
+      ),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('shares one provider search budget with footprint lookups and preserves timeout classification', async () => {
+    const budget = new AbortController();
+    const spy = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(budget.signal);
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      if (new URL(String(input)).searchParams.has('$group')) {
+        budget.abort(new DOMException('Deadline', 'TimeoutError'));
+        init?.signal?.throwIfAborted();
+      }
+      return new Response('[{"hoconum":"130000","holdingcompanyname":"Carrier"}]');
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      await expect(makeService().searchProviders({}, createMockContext())).rejects.toMatchObject({
+        code: JsonRpcErrorCode.Timeout,
+        data: { reason: 'live_search_timeout', retryable: false },
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      spy.mockRestore();
+    }
+  });
   afterEach(() => vi.unstubAllGlobals());
 
   it.each([true, false])(
@@ -712,7 +844,7 @@ describe('OpenDataService', () => {
       expect(result.scanTruncated).toBe(false);
     });
 
-    it('bounds the mirror path by its own row limit and reports that cap', async () => {
+    it('uses a fixed mirror page size independent of the caller limit and reports completeness', async () => {
       const mirror = {
         searchProviders: (options: { rowLimit: number }) =>
           Promise.resolve(providerRows(options.rowLimit)),
@@ -727,9 +859,8 @@ describe('OpenDataService', () => {
       );
 
       expect(fetchMock).not.toHaveBeenCalled();
-      // 10 provider-dimension rows per requested provider, the mirror store's ceiling.
-      expect(result.scanRowCap).toBe(200);
-      expect(result.scanTruncated).toBe(true);
+      expect(result.matched).toBe(2000);
+      expect(result.scanTruncated).toBe(false);
       expect(result.providers).toHaveLength(20);
     });
 
