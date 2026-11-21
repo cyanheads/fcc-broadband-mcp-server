@@ -15,16 +15,16 @@ describe('MCPB dependency agent documentation', () => {
       expect(
         pattern.test('node_modules/@modelcontextprotocol/server/dist/ext/skills/index.js'),
       ).toBe(false);
-      expect(
-        pattern.test('node_modules/@modelcontextprotocol/server/dist/ext/skills/SKILL.md'),
-      ).toBe(false);
     });
-    it(`${name} strips package-root agent documentation`, () => {
+    it(`${name} strips agent documentation from dependencies`, () => {
       for (const path of [
         'node_modules/@cyanheads/mcp-ts-core/framework-skills/add-tool/SKILL.md',
         'node_modules/example/skills/example/SKILL.md',
         'node_modules/example/node_modules/@scope/dep/.agents/instructions.md',
+        'node_modules/example/AGENTS.md',
+        'node_modules/example/CLAUDE.md',
         'node_modules/example/SKILL.md',
+        'node_modules/@modelcontextprotocol/server/dist/ext/skills/SKILL.md',
       ])
         expect(pattern.test(path)).toBe(true);
     });
