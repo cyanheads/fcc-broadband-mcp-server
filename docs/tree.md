@@ -1,6 +1,6 @@
 # fcc-broadband-mcp-server - Directory Structure
 
-Generated on: 2026-11-03 21:28:07
+Generated on: 2026-11-21 18:07:08
 
 ```text
 fcc-broadband-mcp-server/
@@ -28,6 +28,7 @@ fcc-broadband-mcp-server/
 │   ├── 0.2.x/
 │   ├── 0.3.x/
 │   ├── 0.4.x/
+│   ├── 0.5.x/
 │   └── template.md
 ├── docs/
 │   ├── design.md
@@ -186,6 +187,7 @@ fcc-broadband-mcp-server/
 │   │       │   ├── ingest.ts
 │   │       │   ├── state-fips.ts
 │   │       │   └── stores.ts
+│   │       ├── area-filing-periods.ts
 │   │       ├── area-filters.ts
 │   │       ├── open-data-service.ts
 │   │       └── types.ts
@@ -198,6 +200,8 @@ fcc-broadband-mcp-server/
 │   ├── resources/
 │   │   ├── geography-summary.resource.test.ts
 │   │   └── providers-list.resource.test.ts
+│   ├── scripts/
+│   │   └── fcc-mirror-verify.test.ts
 │   ├── services/
 │   │   ├── bdc-api/
 │   │   │   └── bdc-api-service.test.ts
@@ -213,6 +217,7 @@ fcc-broadband-mcp-server/
 │   │   │   └── open-data-service.test.ts
 │   │   └── upstream-error-redaction.test.ts
 │   ├── tools/
+│   │   ├── area-filing-periods.test.ts
 │   │   ├── bdc-deployment.test.ts
 │   │   ├── compare-areas.tool.test.ts
 │   │   ├── find-underserved.tool.test.ts

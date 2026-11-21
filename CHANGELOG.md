@@ -2,6 +2,10 @@
 
 All notable changes to this project. Each entry links to its full per-version file in [changelog/](changelog/).
 
+## [0.5.0](changelog/0.5.x/0.5.0.md) — 2026-11-21 · ⚠️ Breaking
+
+Historical Area Tables and provider filing identities
+
 ## [0.4.0](changelog/0.4.x/0.4.0.md) — 2026-11-03
 
 Historical coverage analysis and paged results
