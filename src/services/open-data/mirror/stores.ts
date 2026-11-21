@@ -6,10 +6,8 @@
  * one). Also owns the row ceilings the specs declare and the read facade
  * imports, and the `mirror_coverage` bookkeeping table (which state-scoped
  * ingest units have fully drained, plus the full-corpus marker), which lives in
- * the deployment database and is created via idempotent DDL on the raw handle —
- * no store declares `migrations`, and the DDL runs on whichever handle a write
- * or read reaches first, so it stays independent of the framework's migration
- * pass.
+ * the deployment database and is created via idempotent DDL on the raw handle,
+ * independently of the deployment schema migration.
  * @module services/open-data/mirror/stores
  */
 
@@ -39,6 +37,13 @@ export const MAX_PROVIDER_SEARCH_ROWS = 2_000;
 
 /** The two single-provider lookups behind a provider summary. */
 export const MAX_PROVIDER_SUMMARY_ROWS = 1_000;
+
+/** Nullable columns let upgrades add metadata without rewriting deployment rows. */
+const DEPLOYMENT_IDENTITY_COLUMNS = {
+  frn: 'TEXT',
+  dbaname: 'TEXT',
+  identity_resolved: 'INTEGER',
+} as const;
 
 /** The five stores backing the Form 477 mirror. */
 export interface Form477Stores {
@@ -80,7 +85,23 @@ export function createForm477Stores(dir: string): Form477Stores {
         maxadup: 'REAL',
         consumer: 'TEXT',
         business: 'TEXT',
+        ...DEPLOYMENT_IDENTITY_COLUMNS,
       },
+      version: 2,
+      migrations: [
+        {
+          version: 2,
+          up(handle) {
+            // The framework creates the current schema before running migrations.
+            const columns = handle.prepare<{ name: string }>('PRAGMA table_info(deployment)').all();
+            for (const [name, type] of Object.entries(DEPLOYMENT_IDENTITY_COLUMNS)) {
+              if (!columns.some((column) => column.name === name)) {
+                handle.exec(`ALTER TABLE deployment ADD COLUMN ${name} ${type}`);
+              }
+            }
+          },
+        },
+      ],
       indexes: [{ columns: ['blockcode'] }],
       limits: { limit: MAX_SCAN_ROWS },
     }),

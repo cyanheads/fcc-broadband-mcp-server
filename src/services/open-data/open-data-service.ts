@@ -1,11 +1,11 @@
 /**
  * @fileoverview FCC Open Data (Socrata) service — wraps opendata.fcc.gov for Form 477 data.
  * Provides access to block-level deployment, area coverage summaries, and provider data.
- * All Form 477 data is as of June 2021 (the last filing period before BDC replaced it).
+ * Area coverage can use earlier filings. Block-level and provider data use June 2021.
  * @module services/open-data/open-data-service
  */
 
-import type { Context } from '@cyanheads/mcp-ts-core';
+import { type Context, z } from '@cyanheads/mcp-ts-core';
 import type { AppConfig } from '@cyanheads/mcp-ts-core/config';
 import {
   JsonRpcErrorCode,
@@ -14,9 +14,14 @@ import {
   serviceUnavailable,
 } from '@cyanheads/mcp-ts-core/errors';
 import type { StorageService } from '@cyanheads/mcp-ts-core/storage';
-import { httpErrorFromResponse, withRetry } from '@cyanheads/mcp-ts-core/utils';
+import { defaultIsTransient, httpErrorFromResponse, withRetry } from '@cyanheads/mcp-ts-core/utils';
 import type { ServerConfig } from '@/config/server-config.js';
-import { Form477Mirror } from './mirror/form477-mirror.js';
+import {
+  AREA_TABLE_BY_DATE,
+  type AreaFilingDate,
+  LATEST_AREA_FILING_DATE,
+} from './area-filing-periods.js';
+import { Form477Mirror, type MirroredDeploymentRow } from './mirror/form477-mirror.js';
 import { MAX_PROVIDER_SEARCH_ROWS, MAX_SCAN_ROWS } from './mirror/stores.js';
 import {
   type AreaScanResult,
@@ -40,6 +45,20 @@ const BASE_URL = 'https://opendata.fcc.gov/resource';
 const TIMEOUT_MS = 30_000;
 const DEFAULT_LIMIT = 1000;
 const MAX_LIMIT = 50000;
+
+/**
+ * Exact-ID FCC queries usually finish in under a second but can take over six.
+ * Share one ten-second budget across batches, including the response body read.
+ */
+const DEPLOYMENT_IDENTITY_BUDGET_MS = 10_000;
+const DEPLOYMENT_IDENTITY_BATCH_SIZE = 100;
+const deploymentIdentityRows = z.array(
+  z.object({
+    sid: z.string(),
+    frn: z.string().nullish(),
+    dbaname: z.string().nullish(),
+  }),
+);
 
 /**
  * Raw Area Table rows one type-wide scan may read before grouping. Bound to the
@@ -244,6 +263,14 @@ export class OpenDataService {
     }
   }
 
+  private fromAreaMirror<T>(
+    asOfDate: AreaFilingDate,
+    ctx: Context,
+    read: (mirror: Form477Mirror) => Promise<T | undefined>,
+  ): Promise<T | undefined> | undefined {
+    return asOfDate === LATEST_AREA_FILING_DATE ? this.fromMirror(ctx, 'area', read) : undefined;
+  }
+
   /**
    * Releases the local mirror's SQLite handles. A no-op when the mirror is
    * disabled, and safe on a store that was never opened.
@@ -279,7 +306,7 @@ export class OpenDataService {
   private fetchJson<T>(
     url: string,
     ctx: Context,
-    opts?: { timeoutError?: () => McpError },
+    opts?: { timeoutError?: () => McpError; maxRetries?: number },
   ): Promise<T[]> {
     return withRetry(
       async () => {
@@ -326,6 +353,7 @@ export class OpenDataService {
         operation: 'OpenDataService.fetchJson',
         baseDelayMs: 1500,
         signal: ctx.signal,
+        ...(opts?.maxRetries !== undefined && { maxRetries: opts.maxRetries }),
       },
     );
   }
@@ -377,6 +405,75 @@ export class OpenDataService {
     return rows;
   }
 
+  /** Populate confirmed metadata by source row ID, leaving unresolved rows retryable. */
+  private async fillLegacyDeploymentIdentity(
+    mirror: Form477Mirror,
+    rows: MirroredDeploymentRow[],
+    ctx: Context,
+  ): Promise<void> {
+    ctx.signal.throwIfAborted();
+    const missing = new Map<string, MirroredDeploymentRow>();
+    for (const row of rows) {
+      if (row.unresolvedIdentitySid) missing.set(row.unresolvedIdentitySid, row);
+    }
+    if (missing.size === 0) return;
+
+    const ids = [...missing.keys()];
+    const budget = AbortSignal.timeout(DEPLOYMENT_IDENTITY_BUDGET_MS);
+    const signal = AbortSignal.any([ctx.signal, budget]);
+    const lookupCtx = { ...ctx, signal };
+    for (let offset = 0; offset < ids.length; offset += DEPLOYMENT_IDENTITY_BATCH_SIZE) {
+      const batch = ids.slice(offset, offset + DEPLOYMENT_IDENTITY_BATCH_SIZE);
+      const requested = new Set(batch);
+      const soqlIds = batch.map((id) => `'${id.replaceAll("'", "''")}'`).join(',');
+      const url = this.buildUrl(DATASET_IDS.DEPLOYMENT, {
+        $select: ':id as sid,frn,dbaname',
+        $where: `:id in (${soqlIds})`,
+        $limit: batch.length,
+      });
+      let data: unknown[];
+      try {
+        signal.throwIfAborted();
+        data = await this.fetchJson<unknown>(url, lookupCtx, { maxRetries: 0 });
+        signal.throwIfAborted();
+      } catch (error) {
+        ctx.signal.throwIfAborted();
+        if (!budget.aborted && !defaultIsTransient(error)) throw error;
+        break;
+      }
+      const parsed = deploymentIdentityRows.safeParse(data);
+      if (!parsed.success) break;
+      const matches = parsed.data.filter(({ sid }) => requested.has(sid));
+      if (matches.length === 0) continue;
+      try {
+        await mirror.saveDeploymentIdentity(matches);
+      } catch (error) {
+        ctx.signal.throwIfAborted();
+        const code = error instanceof Error && 'code' in error ? error.code : undefined;
+        if (
+          typeof code !== 'string' ||
+          !/^SQLITE_(?:BUSY|LOCKED|READONLY|FULL|IOERR)(?:_|$)/.test(code)
+        ) {
+          throw error;
+        }
+        ctx.log.warning('Could not cache FCC provider identity in the local mirror', { code });
+      }
+      ctx.signal.throwIfAborted();
+      for (const { sid, frn, dbaname } of matches) {
+        const row = missing.get(sid);
+        if (!row) continue;
+        if (frn) row.frn = frn;
+        if (dbaname) row.dbaname = dbaname;
+        missing.delete(sid);
+      }
+    }
+    if (missing.size > 0) {
+      ctx.enrich.notice(
+        'FCC registration numbers and DBA names are temporarily unavailable for some mirrored offerings. Retry to fetch the missing details.',
+      );
+    }
+  }
+
   /**
    * Fetches deployment records for a specific census block.
    */
@@ -389,10 +486,15 @@ export class OpenDataService {
     },
     ctx: Context,
   ): Promise<DeploymentRecord[]> {
-    let rows = await this.fromMirror(ctx, 'deployment', (m) =>
-      m.deploymentByBlock(blockFips, options),
-    );
-    if (!rows) {
+    const local = await this.fromMirror(ctx, 'deployment', async (mirror) => {
+      const rows = await mirror.deploymentByBlock(blockFips, options);
+      return rows ? { mirror, rows } : undefined;
+    });
+    let rows: RawDeploymentRow[];
+    if (local) {
+      await this.fillLegacyDeploymentIdentity(local.mirror, local.rows, ctx);
+      rows = local.rows;
+    } else {
       const conditions: string[] = [`blockcode='${blockFips}'`];
       if (options.techCodes?.length) {
         const techList = options.techCodes.map((t) => `'${t}'`).join(',');
@@ -425,6 +527,8 @@ export class OpenDataService {
       blockFips: r.blockcode ?? blockFips,
       providerId: r.provider_id ?? '',
       providerName: r.providername ?? '',
+      ...(r.frn && { frn: r.frn }),
+      ...(r.dbaname && { dbaName: r.dbaname }),
       holdingCompanyName: r.holdingcompanyname ?? '',
       hoconum: r.hoconum ?? '',
       stateAbbr: r.stateabbr ?? '',
@@ -441,6 +545,7 @@ export class OpenDataService {
    */
   async getAreaSegments(
     options: {
+      asOfDate?: AreaFilingDate;
       geographyType: string;
       geographyId?: string;
       techFilter: string;
@@ -450,9 +555,10 @@ export class OpenDataService {
     },
     ctx: Context,
   ): Promise<AreaSegment[]> {
+    const asOfDate = options.asOfDate ?? LATEST_AREA_FILING_DATE;
     const geographyId = options.geographyType === 'nation' ? '0' : (options.geographyId ?? '');
 
-    let rows = await this.fromMirror(ctx, 'area', (m) =>
+    let rows = await this.fromAreaMirror(asOfDate, ctx, (m) =>
       m.areaSegments({ ...options, geographyId }),
     );
     if (!rows) {
@@ -471,7 +577,7 @@ export class OpenDataService {
       }
 
       rows = await this.fetchAllPages<RawAreaRow>(
-        DATASET_IDS.AREA_TABLE,
+        AREA_TABLE_BY_DATE[asOfDate],
         {
           $where: conditions.join(' AND '),
           $limit: 100,
@@ -516,6 +622,7 @@ export class OpenDataService {
    */
   async getAreaStatsBatch(
     options: {
+      asOfDate?: AreaFilingDate;
       geographyType: string;
       geographyIds: string[];
       techFilter: string;
@@ -535,12 +642,13 @@ export class OpenDataService {
       total: number;
     }>
   > {
+    const asOfDate = options.asOfDate ?? LATEST_AREA_FILING_DATE;
     ctx = { ...ctx, signal: AbortSignal.any([ctx.signal, AbortSignal.timeout(48_000)]) };
     const rows: RawAreaRow[] = [];
     for (let offset = 0; offset < options.geographyIds.length; offset += 50) {
       ctx.signal.throwIfAborted();
       const geographyIds = options.geographyIds.slice(offset, offset + 50);
-      let batch = await this.fromMirror(ctx, 'area', (m) =>
+      let batch = await this.fromAreaMirror(asOfDate, ctx, (m) =>
         m.areaStatsBatch({ ...options, geographyIds }),
       );
       if (!batch) {
@@ -553,7 +661,7 @@ export class OpenDataService {
         ];
 
         batch = await this.fetchAllPages<RawAreaRow>(
-          DATASET_IDS.AREA_TABLE,
+          AREA_TABLE_BY_DATE[asOfDate],
           {
             $where: conditions.join(' AND '),
             $limit: DEFAULT_LIMIT,
@@ -582,6 +690,7 @@ export class OpenDataService {
    */
   async getAreaStatsByType(
     options: {
+      asOfDate?: AreaFilingDate;
       geographyType: string;
       techFilter: string;
       speedDown: string;
@@ -590,8 +699,9 @@ export class OpenDataService {
     },
     ctx: Context,
   ): Promise<AreaScanResult> {
+    const asOfDate = options.asOfDate ?? LATEST_AREA_FILING_DATE;
     ctx = { ...ctx, signal: AbortSignal.any([ctx.signal, AbortSignal.timeout(48_000)]) };
-    const mirrored = await this.fromMirror(ctx, 'area', (m) =>
+    const mirrored = await this.fromAreaMirror(asOfDate, ctx, (m) =>
       m.areaStatsByType({ ...options, maxRows: MAX_AREA_SCAN_ROWS }),
     );
 
@@ -619,7 +729,7 @@ export class OpenDataService {
       }
 
       const page = await this.fetchPagesUpTo<RawAreaRow>(
-        DATASET_IDS.AREA_TABLE,
+        AREA_TABLE_BY_DATE[asOfDate],
         {
           $where: conditions.join(' AND '),
           $limit: DEFAULT_LIMIT,
@@ -951,14 +1061,19 @@ export class OpenDataService {
     };
   }
 
-  /** Resolves a GEOID through the live 2021 lookup; the yearless mirror cannot supply names. */
-  async getGeographyName(type: string, id: string, ctx: Context): Promise<string | undefined> {
+  /** Resolves a GEOID through the live filing-year lookup; the yearless mirror cannot supply names. */
+  async getGeographyName(
+    type: string,
+    id: string,
+    ctx: Context,
+    asOfDate: AreaFilingDate = LATEST_AREA_FILING_DATE,
+  ): Promise<string | undefined> {
     if (type === 'nation') return 'United States';
     ctx = { ...ctx, signal: AbortSignal.any([ctx.signal, AbortSignal.timeout(TIMEOUT_MS)]) };
     const geoId = id;
 
     const url = this.buildUrl(DATASET_IDS.GEOGRAPHY_LOOKUP, {
-      $where: `year='2021' AND geoid='${geoId}' AND type='${type}'`,
+      $where: `year='${asOfDate.slice(0, 4)}' AND geoid='${geoId}' AND type='${type}'`,
       $select: 'geoid,type,name',
       $limit: 1,
     });
@@ -968,11 +1083,16 @@ export class OpenDataService {
   }
 
   /**
-   * Resolves GEOIDs through the live 2021 lookup in sequential batches of at
+   * Resolves GEOIDs through the live filing-year lookup in sequential batches of at
    * most 50 IDs, sharing a 30 second deadline across batches and retries.
    * IDs without a lookup match are absent from the returned map.
    */
-  async getGeographyNames(type: string, ids: string[], ctx: Context): Promise<Map<string, string>> {
+  async getGeographyNames(
+    type: string,
+    ids: string[],
+    ctx: Context,
+    asOfDate: AreaFilingDate = LATEST_AREA_FILING_DATE,
+  ): Promise<Map<string, string>> {
     if (ids.length === 0) {
       return new Map();
     }
@@ -988,7 +1108,7 @@ export class OpenDataService {
       const rows = await this.fetchAllPages<RawGeographyRow>(
         DATASET_IDS.GEOGRAPHY_LOOKUP,
         {
-          $where: `year='2021' AND type='${type}' AND geoid IN (${idList})`,
+          $where: `year='${asOfDate.slice(0, 4)}' AND type='${type}' AND geoid IN (${idList})`,
           $select: 'geoid,type,name',
           $limit: DEFAULT_LIMIT,
         },

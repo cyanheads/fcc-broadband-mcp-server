@@ -4,7 +4,7 @@ description: Use fcc_* tools for multi-step broadband gap research, rural or tri
 license: Apache-2.0
 metadata:
   author: "cyanheads"
-  version: "1.0"
+  version: "1.1"
 ---
 
 ## Scope
@@ -19,13 +19,13 @@ Keep every identifier as a string and carry its geography type or source alongsi
 | --- | --- |
 | Geography type and GEOID | Take the pair from fcc_search_geographies into fcc_get_coverage_summary or fcc_compare_areas. County and state IDs also come from fcc_geocode_block. Identical digit lengths do not make county and CBSA codes interchangeable. |
 | Tribal area ID | Resolve the name with fcc_search_geographies. Preserve suffixes: a reservation and its off-reservation trust land can be distinct matches. Do not derive these IDs from a state prefix. |
-| Holding-company number, hoconum | Take it from fcc_search_providers or an offering in fcc_search_availability into fcc_get_provider. An offering's providerId is a different identifier. |
-| BDC as-of date | Request BDC dates with fcc_list_filing_periods using `include_bdc: true`, then select a published BDC date before discovering manifests with fcc_list_downloads. Listing legacy Form 477 periods does not enable historical selection in the analysis tools. |
+| Holding-company number, hoconum | Take it from fcc_search_providers or a block offering into fcc_get_provider for the national profile. On the offering, providerId identifies the Form 477 filing. Use frn for a registration lookup, keeping any leading zeros, and dbaName for the reported trading name. |
+| Filing date | Use fcc_list_filing_periods to find dates with an Area Table for historical coverage. To find newer bulk files, request BDC dates with `include_bdc: true` and pass a BDC date to fcc_list_downloads. |
 
 ## Gates
 
 1. Resolve ambiguous geography names before comparing them. Search is a literal name substring, so include a location qualifier and inspect every candidate's type and name. Follow discovery continuation before treating a list as complete. Names alone do not establish exhaustive state membership, especially for CBSAs and tribal areas.
-2. Align geography type, technology view, speed tier, and population segment before comparing percentages or counts. A rural-only ranking and an all-population summary have different denominators. A tribal geography and the tribal segment of a county describe different scopes.
+2. Carry the filing date, geography type, technology view, speed tier, and population segment from a ranking into its drill-down. For trends crossing December 2020, compare the population totals as well as the unserved counts. The difference alone cannot tell you how many residents gained service. Standalone name discovery uses 2021 names, so use the name returned with the historical coverage result when describing that filing.
 3. Check the requested and returned technology views before reusing a baseline across tools or the geography summary resource. Establish whether satellite is included in each view. Technology combinations overlap, so do not sum separate views into a total.
 4. Inspect population totals and notices before interpreting a zero percentage. An empty requested segment has no population to assess; it does not establish that residents are fully served or unserved. Keep a missing geography distinct from an empty segment.
 5. Check pagination, unmatched-ID guidance, and truncation notices before claiming a statewide ranking or exhaustive provider roster. A sampled provider search remains incomplete even after its returned pages are exhausted; a company absent from that sample is not proven absent from the region.
@@ -49,4 +49,4 @@ Find the holding company by name with fcc_search_providers, then inspect its pro
 
 ### Move to newer evidence
 
-Call fcc_list_filing_periods with `include_bdc: true` and check `hasBdcCredentials`. If credentials are unavailable, stop the BDC chain: legacy dates cannot substitute for BDC dates, and fcc_list_downloads is not advertised. Otherwise select a returned BDC date, then use fcc_list_downloads to discover the relevant files and exhaust manifest continuation. The result supplies file metadata and download URLs; reading and analyzing those files is a separate step. Do not substitute a newer filing date into the fixed-vintage Form 477 tools or treat a manifest as analyzed coverage.
+Call fcc_list_filing_periods with `include_bdc: true` and check `hasBdcCredentials`. If credentials are unavailable, stop the BDC chain. Otherwise select a returned BDC date, then use fcc_list_downloads to discover the relevant files and exhaust manifest continuation. The result supplies file metadata and download URLs. Read the files to analyze their coverage.

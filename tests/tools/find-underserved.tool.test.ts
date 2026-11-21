@@ -416,7 +416,12 @@ describe('findUnderservedTool', () => {
     });
     const result = await findUnderservedTool.handler(input, ctx);
     expect(result.areas[0]!.name).toBe('Hinds County, MS');
-    expect(mockGetGeographyNames).toHaveBeenCalledWith('county', ['28049'], expect.anything());
+    expect(mockGetGeographyNames).toHaveBeenCalledWith(
+      'county',
+      ['28049'],
+      expect.anything(),
+      '2021-06-30',
+    );
   });
 
   it('omits name for a GEOID with no lookup match', async () => {

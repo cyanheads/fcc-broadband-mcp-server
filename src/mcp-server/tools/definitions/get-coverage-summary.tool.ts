@@ -6,6 +6,11 @@
 import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
 import {
+  areaFilingDateInput,
+  areaVintage,
+  vintageNoticeOutput,
+} from '@/services/open-data/area-filing-periods.js';
+import {
   AREA_SPEED_DESCRIPTION,
   AREA_TECH_DESCRIPTION,
   AREA_TECH_FILTERS,
@@ -19,10 +24,11 @@ export const getCoverageSummaryTool = tool('fcc_get_coverage_summary', {
     'Returns a broadband coverage summary for a geography — population with zero, one, two, or three-plus providers at a given speed threshold, split by urban/rural and tribal/non-tribal segments. ' +
     'The primary tool for digital divide and equity analysis. ' +
     'Supports state, county, congressional district, census place, CBSA (metro area), tribal area, and national level. ' +
-    'Data is from FCC Form 477 (as of June 2021), for historical population screening; it cannot establish current BEAD eligibility or address service.',
+    'Historical FCC Form 477 filings support population screening; they cannot establish current BEAD eligibility or address service.',
   annotations: { readOnlyHint: true, openWorldHint: false, idempotentHint: true },
 
   input: z.object({
+    as_of_date: areaFilingDateInput,
     geography_type: z
       .enum(['nation', 'state', 'county', 'cd', 'place', 'cbsa', 'tribal'])
       .describe(
@@ -110,7 +116,8 @@ export const getCoverageSummaryTool = tool('fcc_get_coverage_summary', {
           .describe('One urban/rural × tribal/non-tribal segment.'),
       )
       .describe('Per-segment breakdown by urban/rural and tribal/non-tribal.'),
-    dataVintage: z.string().describe('Data vintage — Form 477 data as of June 2021.'),
+    dataVintage: z.string().describe('Form 477 filing vintage.'),
+    vintageNotice: vintageNoticeOutput,
   }),
 
   // Agent-facing success-path context: applied filter echo.
@@ -218,11 +225,12 @@ export const getCoverageSummaryTool = tool('fcc_get_coverage_summary', {
     );
     const requestCtx = { ...ctx, signal: AbortSignal.any([ctx.signal, deadline.signal]) };
     const areaQuery = {
+      asOfDate: input.as_of_date,
       geographyType: input.geography_type,
       ...(input.geography_id !== undefined && { geographyId: input.geography_id }),
       techFilter: input.tech_filter,
       speedDown: input.speed_down,
-    };
+    } satisfies Parameters<typeof service.getAreaSegments>[0];
     try {
       const [{ segments, confirmedEmptySegment }, geoName] = await Promise.all([
         service
@@ -245,7 +253,12 @@ export const getCoverageSummaryTool = tool('fcc_get_coverage_summary', {
             return { segments, confirmedEmptySegment: unfiltered.length > 0 };
           }),
         service
-          .getGeographyName(input.geography_type, input.geography_id ?? '0', requestCtx)
+          .getGeographyName(
+            input.geography_type,
+            input.geography_id ?? '0',
+            requestCtx,
+            input.as_of_date,
+          )
           .catch((error: unknown) => {
             if (
               ctx.signal.aborted ||
@@ -338,7 +351,7 @@ export const getCoverageSummaryTool = tool('fcc_get_coverage_summary', {
           coveragePct: Math.round(seg.coveragePct * 10) / 10,
           unservedPct: Math.round(seg.unservedPct * 10) / 10,
         })),
-        dataVintage: 'June 2021 (last Form 477 filing period)',
+        ...areaVintage(input.as_of_date),
       };
     } catch (error) {
       if (ctx.signal.aborted) throw error;
@@ -357,6 +370,7 @@ export const getCoverageSummaryTool = tool('fcc_get_coverage_summary', {
       `## ${geoLabel} — Broadband Coverage Summary`,
       `**Geography:** ${result.geography.type}=${result.geography.id}`,
       `**Technology:** ${result.techFilter} | **Speed Threshold:** ${result.speedDownMbps} Mbps | **Data Vintage:** ${result.dataVintage}`,
+      ...(result.vintageNotice ? [`> ${result.vintageNotice}`] : []),
       '',
       `### Population Overview`,
       `**Total Population:** ${result.population.total.toLocaleString()}`,

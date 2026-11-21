@@ -137,6 +137,17 @@ describe('runMirrorInit', () => {
     expect((await stores.geography.readState()).completedAt).toEqual(expect.any(String));
   });
 
+  it('stores the text identity and records confirmed blanks for newly ingested rows', async () => {
+    await completeSmallTables();
+    fetchMock.mockResolvedValueOnce(csv('sid,frn,dbaname\nd1,0001857952,AT&T Mississippi\nd2,,\n'));
+    await runMirrorInit({ stores, states: ['28'], pageDelayMs: 0 });
+    expect(requests()[0]?.searchParams.get('$select')).toContain('frn,dbaname');
+    expect(await stores.deployment.getByIds(['d1', 'd2'])).toMatchObject([
+      { sid: 'd1', frn: '0001857952', dbaname: 'AT&T Mississippi', identity_resolved: 1 },
+      { sid: 'd2', frn: null, dbaname: null, identity_resolved: 1 },
+    ]);
+  });
+
   it('rejects invalid state FIPS before HTTP or persistence', async () => {
     await expect(runMirrorInit({ stores, states: ['11', '99'] })).rejects.toThrow(
       'Unknown state FIPS "99"',
@@ -170,7 +181,7 @@ describe('runMirrorInit', () => {
     ['wrong offset type', JSON.stringify({ scope: 'state:11', offset: '42' }), '0'],
   ])('resumes a %s deployment cursor at the appropriate offset', async (_name, cursor, offset) => {
     await completeSmallTables();
-    await stores.deployment.writeState({ status: 'error', cursor });
+    await stores.deployment.writeState({ status: 'error', mode: 'init', cursor });
     await runMirrorInit({ stores, states: ['11'], pageDelayMs: 0 });
     expect(requests()[0]?.searchParams.get('$offset')).toBe(offset);
     expect((await stores.deployment.readState()).cursor).toBeUndefined();
@@ -180,10 +191,12 @@ describe('runMirrorInit', () => {
   it('resumes a small table and the area store independently', async () => {
     await stores.geography.writeState({
       status: 'error',
+      mode: 'init',
       cursor: JSON.stringify({ scope: 'fcc-477-geography', offset: 7 }),
     });
     await stores.area.writeState({
       status: 'error',
+      mode: 'init',
       cursor: JSON.stringify({ scope: 'state:11', offset: 9 }),
     });
     await runMirrorInit({ stores, states: ['11'], pageDelayMs: 0 });

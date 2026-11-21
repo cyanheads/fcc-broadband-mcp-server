@@ -6,6 +6,11 @@
 import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
 import {
+  areaFilingDateInput,
+  areaVintage,
+  vintageNoticeOutput,
+} from '@/services/open-data/area-filing-periods.js';
+import {
   AREA_SPEED_DESCRIPTION,
   AREA_TECH_DESCRIPTION,
   AREA_TECH_FILTERS,
@@ -20,10 +25,11 @@ export const findUnderservedTool = tool('fcc_find_underserved', {
     'Supports historical population screening and broadband equity research; it cannot establish current BEAD eligibility or address service. ' +
     'Accepts a state abbreviation to narrow scope or runs nationwide. ' +
     'Defaults to rural areas where underservice is most concentrated. ' +
-    'Data is from FCC Form 477 (as of June 2021).',
+    'Uses historical FCC Form 477 filings (June 2021 by default).',
   annotations: { readOnlyHint: true, openWorldHint: false, idempotentHint: true },
 
   input: z.object({
+    as_of_date: areaFilingDateInput,
     state: z
       .string()
       .regex(/^[A-Z]{2}$/)
@@ -100,7 +106,8 @@ export const findUnderservedTool = tool('fcc_find_underserved', {
     geographyType: z.string().describe('Geography type returned.'),
     speedDownMbps: z.number().describe('Speed threshold used in Mbps.'),
     urbanRuralFilter: z.string().describe('Urban/rural filter applied.'),
-    dataVintage: z.string().describe('Data vintage — Form 477 data as of June 2021.'),
+    dataVintage: z.string().describe('Form 477 filing vintage.'),
+    vintageNotice: vintageNoticeOutput,
   }),
 
   // Agent-facing success-path context: result count, truncation disclosure, applied filter echo, and empty-result notice.
@@ -225,6 +232,7 @@ export const findUnderservedTool = tool('fcc_find_underserved', {
     // the ranked list afterwards and never bounds the data the ranking sees.
     const scan = await service.getAreaStatsByType(
       {
+        asOfDate: input.as_of_date,
         geographyType: input.geography_type,
         techFilter: input.tech_filter,
         speedDown: input.speed_down,
@@ -307,7 +315,7 @@ export const findUnderservedTool = tool('fcc_find_underserved', {
         geographyType: input.geography_type,
         speedDownMbps: parseFloat(input.speed_down),
         urbanRuralFilter: input.urban_rural_filter,
-        dataVintage: 'June 2021 (last Form 477 filing period)',
+        ...areaVintage(input.as_of_date),
       };
     }
 
@@ -317,6 +325,7 @@ export const findUnderservedTool = tool('fcc_find_underserved', {
         input.geography_type,
         limited.map((s) => s.id),
         requestCtx,
+        input.as_of_date,
       )
       .catch((error: unknown) => {
         if (ctx.signal.aborted || (error instanceof Error && error.name === 'AbortError'))
@@ -352,7 +361,7 @@ export const findUnderservedTool = tool('fcc_find_underserved', {
       geographyType: input.geography_type,
       speedDownMbps: parseFloat(input.speed_down),
       urbanRuralFilter: input.urban_rural_filter,
-      dataVintage: 'June 2021 (last Form 477 filing period)',
+      ...areaVintage(input.as_of_date),
     };
   },
 
@@ -363,6 +372,7 @@ export const findUnderservedTool = tool('fcc_find_underserved', {
     const lines = [
       `## Underserved Areas — ${result.geographyType} level`,
       `**Speed Threshold:** ${result.speedDownMbps} Mbps | **Area Filter:** ${urLabel} (${result.urbanRuralFilter}) | **Data Vintage:** ${result.dataVintage}`,
+      ...(result.vintageNotice ? [`> ${result.vintageNotice}`] : []),
       `**Shown:** ${result.areas.length}`,
       `**Offset:** ${result.offset}`,
       ...(result.nextOffset !== undefined ? [`**Next offset:** ${result.nextOffset}`] : []),

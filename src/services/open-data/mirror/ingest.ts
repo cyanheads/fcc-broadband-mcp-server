@@ -21,6 +21,7 @@ import {
   type MirrorStore,
 } from '@cyanheads/mcp-ts-core/mirror';
 import { withRetry } from '@cyanheads/mcp-ts-core/utils';
+import { DATASET_IDS } from '../types.js';
 import { parseCsv } from './csv.js';
 import { ALL_STATE_FIPS, isStateFips, prefixUpperBound, STATE_FIPS_TO_ABBR } from './state-fips.js';
 import { type Form477Stores, FULL_SCOPE, isCovered, markCovered, stateScope } from './stores.js';
@@ -34,7 +35,7 @@ const DEFAULT_PAGE_DELAY_MS = 250;
 export const NATIONAL_AREA_SCOPE = 'national';
 
 const DEPLOYMENT_SELECT =
-  ':id as sid,blockcode,provider_id,providername,holdingcompanyname,hoconum,stateabbr,techcode,maxaddown,maxadup,consumer,business';
+  ':id as sid,blockcode,provider_id,providername,holdingcompanyname,hoconum,stateabbr,techcode,maxaddown,maxadup,consumer,business,frn,dbaname';
 const AREA_SELECT =
   ':id as sid,type,id,tech,speed,urban_rural,tribal_non,has_0,has_1,has_2,has_3more';
 const PROVIDER_SUMMARY_SELECT = ':id as sid,hoconum,tech,d_1,d_2,d_3,d_4,d_5,d_6,d_7,d_8';
@@ -183,6 +184,9 @@ function mapDeploymentRow(r: Record<string, string>): MirrorRow {
     maxadup: toRealOrNull(r.maxadup),
     consumer: r.consumer ?? '',
     business: r.business ?? '',
+    frn: r.frn || null,
+    dbaname: r.dbaname || null,
+    identity_resolved: 1,
   };
 }
 
@@ -237,10 +241,17 @@ async function runAreaScope(
     store: stores.area,
     ...(options.log ? { logger: options.log } : {}),
     async *sync({ cursor }) {
-      for await (const page of pagedCsv('xvwq-qtaj', scope, AREA_SELECT, where, cursor, options)) {
+      for await (const page of pagedCsv(
+        DATASET_IDS.AREA_TABLE,
+        scope,
+        AREA_SELECT,
+        where,
+        cursor,
+        options,
+      )) {
         yield {
           records: page.rows.map((r) => ({
-            sid: requireSid(r, 'xvwq-qtaj'),
+            sid: requireSid(r, DATASET_IDS.AREA_TABLE),
             type: r.type ?? '',
             id: r.id ?? '',
             tech: r.tech ?? '',

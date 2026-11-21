@@ -1,5 +1,5 @@
 /**
- * @fileoverview Canonical technology combinations and speed pairs for the June 2021 FCC Area Table.
+ * @fileoverview Canonical technology combinations and speed pairs for FCC Area Tables.
  * @module services/open-data/area-filters
  */
 

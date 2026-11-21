@@ -35,6 +35,29 @@ function makeService(mirror?: Form477Mirror): OpenDataService {
 }
 
 describe('OpenDataService sparse upstream records', () => {
+  it('maps FCC registration and doing-business-as fields as distinct strings', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(
+            '[{"provider_id":"76499","frn":"0001857952","dbaname":"AT&T Mississippi"},{"provider_id":"81097","frn":""}]',
+          ),
+      ),
+    );
+    const rows = await makeService().getDeploymentByBlock(
+      '281159503002055',
+      {},
+      createMockContext(),
+    );
+    expect(rows).toMatchObject([
+      { providerId: '76499', frn: '0001857952', dbaName: 'AT&T Mississippi' },
+      { providerId: '81097' },
+    ]);
+    expect(rows[1]).not.toHaveProperty('frn');
+    expect(rows[1]).not.toHaveProperty('dbaName');
+  });
+
   it.each(['single', 'batch'])(
     'bounds optional %s name retries with one total deadline',
     async (kind) => {
@@ -1081,14 +1104,20 @@ describe('OpenDataService', () => {
       const fullPage = JSON.stringify(
         Array.from({ length: 1000 }, (_, i) => areaRow(String(i).padStart(5, '0'), 'R')),
       );
-      const fetchMock = vi.fn().mockResolvedValue(jsonResponse(fullPage));
+      const fetchMock = vi.fn((_url: string) => Promise.resolve(jsonResponse(fullPage)));
       vi.stubGlobal('fetch', fetchMock);
 
-      const result = await makeService().getAreaStatsByType(NATIONWIDE_SCAN, createMockContext());
+      const result = await makeService().getAreaStatsByType(
+        { ...NATIONWIDE_SCAN, asOfDate: '2018-06-30' },
+        createMockContext(),
+      );
 
       expect(result.scanTruncated).toBe(true);
       expect(result.scanRowCap).toBe(MAX_SCAN_ROWS);
       expect(fetchMock).toHaveBeenCalledTimes(MAX_SCAN_ROWS / 1000);
+      expect(new Set(fetchMock.mock.calls.map(([url]) => new URL(url).pathname))).toEqual(
+        new Set(['/resource/cekp-f8tj.json']),
+      );
     });
 
     it('reports scanTruncated on the mirror path when rows fall short of the match', async () => {

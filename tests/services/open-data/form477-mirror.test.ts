@@ -15,8 +15,9 @@ import { join } from 'node:path';
 import type { Context } from '@cyanheads/mcp-ts-core';
 import type { AppConfig } from '@cyanheads/mcp-ts-core/config';
 import { JsonRpcErrorCode, McpError } from '@cyanheads/mcp-ts-core/errors';
+import { sqliteMirrorStore } from '@cyanheads/mcp-ts-core/mirror';
 import type { StorageService } from '@cyanheads/mcp-ts-core/storage';
-import { createMockContext } from '@cyanheads/mcp-ts-core/testing';
+import { createMockContext, getEnrichment } from '@cyanheads/mcp-ts-core/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ServerConfig } from '@/config/server-config.js';
 import { Form477Mirror } from '@/services/open-data/mirror/form477-mirror.js';
@@ -70,6 +71,9 @@ async function seedMirror(dir: string): Promise<Form477Mirror> {
         maxadup: 35,
         consumer: '1',
         business: '0',
+        identity_resolved: 1,
+        frn: '0001857952',
+        dbaname: 'Comcast DC',
       },
       {
         sid: 'row-dc-2',
@@ -84,6 +88,7 @@ async function seedMirror(dir: string): Promise<Form477Mirror> {
         maxadup: 1000,
         consumer: '1',
         business: '1',
+        identity_resolved: 1,
       },
       {
         sid: 'row-wy-1',
@@ -98,6 +103,7 @@ async function seedMirror(dir: string): Promise<Form477Mirror> {
         maxadup: 3,
         consumer: '1',
         business: '0',
+        identity_resolved: 1,
       },
     ],
     [],
@@ -381,12 +387,184 @@ describe('mirror-failure fallback', () => {
 });
 
 describe('deployment routing', () => {
+  it('upgrades a populated prior layout and caches exact legacy rows, including blanks', async () => {
+    const legacyDir = mkdtempSync(join(tmpdir(), 'fcc-legacy-'));
+    const deployment = sqliteMirrorStore({
+      path: join(legacyDir, 'deployment.sqlite'),
+      table: 'deployment',
+      primaryKey: 'sid',
+      columns: {
+        sid: 'TEXT',
+        blockcode: 'TEXT',
+        provider_id: 'TEXT',
+        providername: 'TEXT',
+        holdingcompanyname: 'TEXT',
+        hoconum: 'TEXT',
+        stateabbr: 'TEXT',
+        techcode: 'TEXT',
+        maxaddown: 'REAL',
+        maxadup: 'REAL',
+        consumer: 'TEXT',
+        business: 'TEXT',
+      },
+      indexes: [{ columns: ['blockcode'] }],
+    });
+    const blockcode = '110010001011000';
+    const first = { sid: 'row-1', provider_id: '76499', blockcode, techcode: '11' };
+    const blank = { sid: 'row-2', provider_id: '76499', blockcode, techcode: '50' };
+    await deployment.applyBatch([first, blank], []);
+    await markCovered(deployment, stateScope('11'));
+    await deployment.close();
+    const migrated = new Form477Mirror(legacyDir);
+    try {
+      const service = makeService(migrated);
+      const ctx = createMockContext();
+      fetchMock.mockImplementationOnce(async (_url: string, init: RequestInit) => {
+        expect(init.signal).toBeDefined();
+        return liveJson([{ sid: 'row-2' }, { sid: 'row-1', frn: '0001857952', dbaname: 'AT&T' }]);
+      });
+      const rows = await service.getDeploymentByBlock(blockcode, {}, ctx);
+      expect(rows).toMatchObject([
+        { techCode: '11', frn: '0001857952', dbaName: 'AT&T' },
+        { techCode: '50' },
+      ]);
+      expect(rows[1]).not.toHaveProperty('frn');
+      expect(rows[1]).not.toHaveProperty('dbaName');
+      const url = new URL(fetchMock.mock.calls[0]?.[0]);
+      expect(url.searchParams.get('$select')).toBe(':id as sid,frn,dbaname');
+      expect(url.searchParams.get('$where')).toBe(":id in ('row-1','row-2')");
+      expect(getEnrichment(ctx).notice).toBeUndefined();
+      await migrated.close();
+      expect(await service.getDeploymentByBlock(blockcode, {}, ctx)).toEqual(rows);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      await migrated.close();
+      rmSync(legacyDir, { recursive: true, force: true });
+    }
+  });
+
+  it('retains local rows and retries only unresolved IDs after a later batch fails', async () => {
+    const blockcode = '110010001011001';
+    const rows = Array.from({ length: 101 }, (_, index) => ({
+      sid: `row-${String(index).padStart(3, '0')}`,
+      blockcode,
+      provider_id: '76499',
+    }));
+    await mirror.stores.deployment.applyBatch(rows, []);
+    fetchMock
+      .mockResolvedValueOnce(liveJson(rows.slice(0, 100).map(({ sid }) => ({ sid }))))
+      .mockResolvedValueOnce(new Response('{}', { status: 503 }));
+    const ctx = createMockContext();
+    const service = makeService(mirror);
+    expect(await service.getDeploymentByBlock(blockcode, {}, ctx)).toHaveLength(101);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(getEnrichment(ctx).notice).toContain('temporarily unavailable');
+    expect(await mirror.stores.deployment.getByIds(['row-099', 'row-100'])).toMatchObject([
+      { sid: 'row-099', identity_resolved: 1 },
+      { sid: 'row-100', identity_resolved: null },
+    ]);
+    fetchMock.mockResolvedValueOnce(liveJson([{ sid: 'row-100', frn: '0012345678' }]));
+    const retried = await service.getDeploymentByBlock(blockcode, {}, createMockContext());
+    expect(retried).toHaveLength(101);
+    expect(retried.at(-1)).toMatchObject({ frn: '0012345678' });
+    const url = new URL(fetchMock.mock.calls[2]?.[0]);
+    expect(url.searchParams.get('$where')).toBe(":id in ('row-100')");
+  });
+
+  it('returns confirmed identity if the local cache is read-only', async () => {
+    const blockcode = '110010001011001';
+    await mirror.stores.deployment.applyBatch([{ sid: 'row-old', blockcode }], []);
+    const handle = await mirror.stores.deployment.raw();
+    handle.exec('PRAGMA query_only = ON');
+    const ctx = createMockContext();
+    const warning = vi.spyOn(ctx.log, 'warning');
+    fetchMock.mockResolvedValueOnce(
+      liveJson([{ sid: 'row-old', frn: '0012345678', dbaname: 'Local ISP' }]),
+    );
+    try {
+      const rows = await makeService(mirror).getDeploymentByBlock(blockcode, {}, ctx);
+      expect(rows).toMatchObject([{ frn: '0012345678', dbaName: 'Local ISP' }]);
+      expect(getEnrichment(ctx).notice).toBeUndefined();
+      expect(warning).toHaveBeenCalledWith(
+        'Could not cache FCC provider identity in the local mirror',
+        expect.objectContaining({ code: 'SQLITE_READONLY' }),
+      );
+      expect(await mirror.stores.deployment.getByIds(['row-old'])).toMatchObject([
+        { identity_resolved: null },
+      ]);
+    } finally {
+      handle.exec('PRAGMA query_only = OFF');
+    }
+  });
+
+  it('lets an unexpected cache write exception propagate', async () => {
+    const blockcode = '110010001011001';
+    await mirror.stores.deployment.applyBatch([{ sid: 'row-old', blockcode }], []);
+    fetchMock.mockResolvedValueOnce(liveJson([{ sid: 'row-old', frn: '0012345678' }]));
+    const failure = new TypeError('Broken cache write');
+    const save = vi.spyOn(mirror, 'saveDeploymentIdentity').mockRejectedValueOnce(failure);
+    const ctx = createMockContext();
+    try {
+      await expect(makeService(mirror).getDeploymentByBlock(blockcode, {}, ctx)).rejects.toBe(
+        failure,
+      );
+      expect(getEnrichment(ctx).notice).toBeUndefined();
+    } finally {
+      save.mockRestore();
+    }
+  });
+
+  it('returns local results when the shared identity deadline expires', async () => {
+    const blockcode = '110010001011001';
+    await mirror.stores.deployment.applyBatch([{ sid: 'row-old', blockcode }], []);
+    const budget = new AbortController();
+    const timeout = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(budget.signal);
+    try {
+      fetchMock.mockImplementationOnce(async (_url: string, init: RequestInit) => {
+        budget.abort(new DOMException('Identity deadline', 'TimeoutError'));
+        init.signal?.throwIfAborted();
+      });
+      const ctx = createMockContext();
+      expect(await makeService(mirror).getDeploymentByBlock(blockcode, {}, ctx)).toHaveLength(1);
+      expect(timeout).toHaveBeenCalledWith(10_000);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(getEnrichment(ctx).notice).toContain('temporarily unavailable');
+      expect(await mirror.stores.deployment.getByIds(['row-old'])).toMatchObject([
+        { identity_resolved: null },
+      ]);
+    } finally {
+      timeout.mockRestore();
+    }
+  });
+
+  it('propagates cancellation during a legacy lookup without persisting a result', async () => {
+    const blockcode = '110010001011001';
+    await mirror.stores.deployment.applyBatch([{ sid: 'row-old', blockcode }], []);
+    const caller = new AbortController();
+    const reason = new DOMException('Cancelled by caller', 'AbortError');
+    fetchMock.mockImplementationOnce(async () => {
+      caller.abort(reason);
+      return liveJson([{ sid: 'row-old', frn: '0012345678' }]);
+    });
+    const ctx = createMockContext({ signal: caller.signal });
+    await expect(makeService(mirror).getDeploymentByBlock(blockcode, {}, ctx)).rejects.toBe(reason);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(getEnrichment(ctx).notice).toBeUndefined();
+    expect(await mirror.stores.deployment.getByIds(['row-old'])).toMatchObject([
+      { identity_resolved: null },
+    ]);
+  });
+
   it('serves a covered state from the mirror without a live call', async () => {
     const service = makeService(mirror);
     const records = await service.getDeploymentByBlock('110010001011000', {}, ctx);
     expect(fetchMock).not.toHaveBeenCalled();
     expect(records).toHaveLength(2);
     const comcast = records.find((r) => r.hoconum === '130235');
+    expect(comcast).toMatchObject({ frn: '0001857952', dbaName: 'Comcast DC' });
+    const verizon = records.find((r) => r.hoconum === '131425');
+    expect(verizon).not.toHaveProperty('frn');
+    expect(verizon).not.toHaveProperty('dbaName');
     expect(comcast).toMatchObject({
       blockFips: '110010001011000',
       providerName: 'Comcast of DC',
@@ -430,6 +608,41 @@ describe('deployment routing', () => {
 });
 
 describe('area routing', () => {
+  it('bypasses populated June 2021 area reads for an earlier filing', async () => {
+    const service = makeService(mirror);
+    const filters = { geographyType: 'county', techFilter: 'acfosw', speedDown: '25' };
+    const query = { ...filters, geographyId: '11001' };
+    await expect(service.getAreaSegments(query, ctx)).resolves.toMatchObject([
+      { population: { total: 100 } },
+    ]);
+    await expect(
+      service.getAreaSegments({ ...query, asOfDate: '2021-06-30' }, ctx),
+    ).resolves.toMatchObject([{ population: { total: 100 } }]);
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    fetchMock.mockImplementation((url: string) => {
+      expect(new URL(url).pathname).toBe('/resource/xv2f-wqqz.json');
+      return Promise.resolve(liveJson([{ id: '11001', has_0: '123', has_1: '456' }]));
+    });
+    const historical = { ...filters, asOfDate: '2016-12-31' as const };
+    await expect(
+      service.getAreaSegments({ ...historical, geographyId: '11001' }, ctx),
+    ).resolves.toMatchObject([{ population: { total: 579 } }]);
+    await expect(
+      service.getAreaStatsBatch({ ...historical, geographyIds: ['11001'] }, ctx),
+    ).resolves.toMatchObject([{ id: '11001', total: 579 }]);
+    await expect(
+      service.getAreaStatsByType({ ...historical, stateFipsPrefix: '11' }, ctx),
+    ).resolves.toMatchObject({ stats: [{ id: '11001', total: 579 }], scanTruncated: false });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+
+    fetchMock.mockResolvedValueOnce(new Response('Forbidden', { status: 403 }));
+    await expect(
+      service.getAreaSegments({ ...historical, geographyId: '11001' }, ctx),
+    ).rejects.toBeInstanceOf(McpError);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
   it('serves covered-state area segments from the mirror', async () => {
     const service = makeService(mirror);
     const segments = await service.getAreaSegments(

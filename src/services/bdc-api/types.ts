@@ -3,6 +3,8 @@
  * @module services/bdc-api/types
  */
 
+import { AREA_TABLE_BY_DATE } from '../open-data/area-filing-periods.js';
+
 /** BDC API response envelope. */
 export interface BdcApiEnvelope<T> {
   data: T;
@@ -70,18 +72,9 @@ export interface DownloadFile {
  */
 export const BDC_FIRST_AS_OF_DATE = '2022-06-30';
 
-/** Hardcoded Form 477 filing periods (Jun 2015 – Jun 2021). */
+/** Public Area Table dates and earlier Form 477 filing periods. */
 export const FORM477_PERIODS: FilingPeriod[] = [
-  { asOfDate: '2021-06-30', source: 'form477' },
-  { asOfDate: '2020-12-31', source: 'form477' },
-  { asOfDate: '2020-06-30', source: 'form477' },
-  { asOfDate: '2019-12-31', source: 'form477' },
-  { asOfDate: '2019-06-30', source: 'form477' },
-  { asOfDate: '2018-12-31', source: 'form477' },
-  { asOfDate: '2018-06-30', source: 'form477' },
-  { asOfDate: '2017-12-31', source: 'form477' },
-  { asOfDate: '2017-06-30', source: 'form477' },
-  { asOfDate: '2016-12-31', source: 'form477' },
+  ...Object.keys(AREA_TABLE_BY_DATE).map((asOfDate) => ({ asOfDate, source: 'form477' as const })),
   { asOfDate: '2016-06-30', source: 'form477' },
   { asOfDate: '2015-12-31', source: 'form477' },
   { asOfDate: '2015-06-30', source: 'form477' },

@@ -12,26 +12,26 @@ import { ALL_STATE_FIPS, STATE_FIPS_TO_ABBR } from '@/services/open-data/mirror/
 import {
   closeForm477Stores,
   createForm477Stores,
+  type Form477Stores,
   FULL_SCOPE,
   listCovered,
 } from '@/services/open-data/mirror/stores.js';
 
-const config = getServerConfig();
-const stores = createForm477Stores(config.mirrorPath);
-
-console.log(`Mirror directory: ${config.mirrorPath}\n`);
-
-let ok = true;
-try {
+/** Writes the mirror's coverage and integrity report. Returns false if any store failed its integrity check. */
+export async function verifyMirror(
+  stores: Form477Stores,
+  writeLine: (line: string) => void,
+): Promise<boolean> {
+  let ok = true;
   for (const [name, store] of Object.entries(stores)) {
-    const state = await store.readState();
+    const state = name === 'providerDim' ? undefined : await store.readState();
     const count = await store.count();
     const integrity = await store.integrityCheck();
     if (!integrity.ok) ok = false;
-    console.log(
-      `${name.padEnd(16)} status=${state.status.padEnd(11)} rows=${String(count).padStart(10)} ` +
+    writeLine(
+      `${name.padEnd(16)} status=${(state?.status ?? 'derived').padEnd(11)} rows=${String(count).padStart(10)} ` +
         `integrity=${integrity.ok ? 'ok' : `FAILED (${integrity.results.join('; ')})`}` +
-        (state.error ? ` lastError=${state.error}` : ''),
+        (state?.error ? ` lastError=${state.error}` : ''),
     );
   }
 
@@ -41,18 +41,27 @@ try {
     .map((s) => s.slice('state:'.length));
   const full = covered.includes(FULL_SCOPE);
 
-  console.log(
+  writeLine(
     `\nCovered states (${coveredStates.length}/${ALL_STATE_FIPS.length}): ` +
       (coveredStates.map((f) => `${f}=${STATE_FIPS_TO_ABBR[f] ?? '?'}`).join(' ') || 'none'),
   );
-  console.log(`Full-corpus marker: ${full ? 'present' : 'absent'}`);
-  console.log(
+  writeLine(`Full-corpus marker: ${full ? 'present' : 'absent'}`);
+  writeLine(
     full
-      ? 'All Form 477 queries (including provider search/summary) serve from the mirror.'
-      : 'Provider search/summary and non-state geographies (cbsa/tribal/nation) serve live until the full corpus is ingested.',
+      ? 'The mirror covers June 2021 block, area and provider data nationwide.'
+      : 'The mirror covers June 2021 block and area data in the listed states. Provider queries and areas without a state prefix use FCC Open Data until full coverage.',
   );
-} finally {
-  await closeForm477Stores(stores);
+  writeLine('Earlier Area Tables and geography names use FCC Open Data.');
+  return ok;
 }
 
-process.exit(ok ? 0 : 1);
+if (import.meta.main) {
+  const { mirrorPath } = getServerConfig();
+  const stores = createForm477Stores(mirrorPath);
+  try {
+    console.log(`Mirror directory: ${mirrorPath}\n`);
+    process.exitCode = (await verifyMirror(stores, console.log)) ? 0 : 1;
+  } finally {
+    await closeForm477Stores(stores);
+  }
+}

@@ -41,6 +41,8 @@ describe('deployment catalog', () => {
       as_of_date: '2024-06-30',
     });
     expect(app.landing).toEqual({ requireAuth: false });
+    expect(app.instructions).toContain('December 2016');
+    expect(app.instructions).toContain('as_of_date');
   });
 
   it('initializes all service accessors and closes them through the captured lifecycle callbacks', async () => {

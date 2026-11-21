@@ -53,6 +53,7 @@ Note that tribal areas often show the highest unserved rates in FCC data.`,
 
 ### Step 1 — Establish baseline coverage
 Use \`fcc_get_coverage_summary\` or \`fcc_find_underserved\` to get broadband coverage data for the region.
+- Choose an Area Table using fcc_list_filing_periods. Carry its as_of_date through the ranking, comparisons, and summary calls.
 - Technology filter: "acfow" (satellite-excluding historical terrestrial screening, including all fixed wireless). Explicit "acfosw" includes satellite.
 - Compare at both 25/3 Mbps and 100/10 Mbps download/upload thresholds; the 100 key does not measure 100/20 service.
 - These historical population aggregates cannot establish current BEAD eligibility or address service. The acfow combination is not an exact program-technology eligibility filter.
@@ -77,10 +78,10 @@ Use \`fcc_search_providers\` and \`fcc_compare_areas\` to:
 For rural and underserved areas:
 - Rank historical population gaps for further research
 - Verify current location-level service and applicable program rules separately before drawing eligibility conclusions
-- Note that Form 477 data is from June 2021; current conditions may differ
+- Report the filing date for each result. In comparisons spanning December 2020, the population baseline can change. A difference in unserved counts alone cannot establish how many residents gained service.
 
 ### Data limitations to acknowledge
-- All FCC broadband data is Form 477 (as of June 2021) — ISP self-reported, may overstate coverage
+- Block offerings and provider profiles describe the network as of June 2021. Keep that date visible when comparing them with an earlier Area Table.
 - Census block-level reporting means some addresses within a "covered" block may lack service
 - BDC data (2022+) is available via bulk download only — not queryable row-by-row via this server
 

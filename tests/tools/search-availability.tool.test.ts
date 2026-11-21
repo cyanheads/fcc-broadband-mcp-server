@@ -49,6 +49,50 @@ describe('searchAvailabilityTool', () => {
     expect(enrichment.notice).toBeUndefined();
   });
 
+  it('keeps the filing number and registered provider name when identity details are absent', async () => {
+    const result = await runToolContract(searchAvailabilityTool, { block_fips: '530330081021016' });
+    const { providers } = searchAvailabilityTool.output.parse(result.structuredContent);
+    expect(providers).toMatchObject([{ providerId: '0001234', providerName: 'Comcast Cable' }]);
+    expect(JSON.stringify(result.content)).toContain('0001234');
+    expect(providers[0]).not.toHaveProperty('frn');
+    expect(providers[0]).not.toHaveProperty('dbaName');
+  });
+
+  it('returns the filing number, FRN, and DBA through both response surfaces', async () => {
+    expect(searchAvailabilityTool.output.shape.providers.element.shape.providerId.description).toBe(
+      'FCC-assigned Form 477 filing number.',
+    );
+    mockGetDeploymentByBlock.mockResolvedValue([
+      { ...MOCK_PROVIDER, providerId: '76499', frn: '0001857952', dbaName: 'AT&T Mississippi' },
+    ]);
+    const result = await runToolContract(searchAvailabilityTool, { block_fips: '530330081021016' });
+    expect(result.isError).not.toBe(true);
+    expect(result.structuredContent).toMatchObject({
+      providers: [{ providerId: '76499', frn: '0001857952', dbaName: 'AT&T Mississippi' }],
+    });
+    const rendered = JSON.stringify(result.content);
+    expect(rendered).toContain('76499');
+    expect(rendered).toContain('FRN:** 0001857952');
+    expect(rendered).toContain('DBA:** AT&T Mississippi');
+  });
+
+  it('renders the missing legacy metadata notice alongside the local offerings', async () => {
+    const notice =
+      'FCC registration numbers and DBA names are temporarily unavailable for some mirrored offerings. Retry to fetch the missing details.';
+    mockGetDeploymentByBlock.mockImplementationOnce(
+      async (_blockFips: string, _options: unknown, ctx: ReturnType<typeof createMockContext>) => {
+        ctx.enrich.notice(notice);
+        return [MOCK_PROVIDER];
+      },
+    );
+    const result = await runToolContract(searchAvailabilityTool, { block_fips: '530330081021016' });
+    expect(result.structuredContent).toMatchObject({
+      providers: [{ providerId: '0001234' }],
+      notice,
+    });
+    expect(JSON.stringify(result.content)).toContain(notice);
+  });
+
   it.each([true, false])(
     'renders all applied filters for consumer=%s through both surfaces',
     async (consumer) => {

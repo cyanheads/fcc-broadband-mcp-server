@@ -6,11 +6,12 @@
 import { tool, z } from '@cyanheads/mcp-ts-core';
 import { getServerConfig } from '@/config/server-config.js';
 import { getBdcApiService } from '@/services/bdc-api/bdc-api-service.js';
+import { AREA_TABLE_BY_DATE } from '@/services/open-data/area-filing-periods.js';
 
 export const listFilingPeriodsTool = tool('fcc_list_filing_periods', {
   title: 'List Filing Periods',
   description:
-    'Returns available data vintages: Form 477 filing periods (hardcoded Jun 2015 – Jun 2021, always available) and BDC as-of dates from the authenticated API (Jun 2022 onward, requires credentials). ' +
+    'Lists Form 477 filing periods (June 2015 to June 2021) with Area Table availability and BDC as-of dates from the authenticated API (June 2022 onward, requires credentials). ' +
     'When hasBdcCredentials is true, call this before fcc_list_downloads to determine valid as_of_date values. ' +
     'Note: there is a data gap between June 2021 (last Form 477) and June 2022 (first BDC filing period).',
   annotations: { readOnlyHint: true, openWorldHint: false, idempotentHint: true },
@@ -41,6 +42,12 @@ export const listFilingPeriodsTool = tool('fcc_list_filing_periods', {
               .string()
               .optional()
               .describe('Date the dataset was published, if available.'),
+            areaCoverageAvailable: z
+              .boolean()
+              .optional()
+              .describe(
+                'Whether the Form 477 filing date is accepted by the three Area Table tools. Omitted for BDC dates.',
+              ),
           })
           .describe('A filing period entry.'),
       )
@@ -69,7 +76,13 @@ export const listFilingPeriodsTool = tool('fcc_list_filing_periods', {
     const bdcPeriods = periods.filter((p) => p.source === 'bdc');
 
     // Sort newest first
-    const sorted = periods.sort((a, b) => b.asOfDate.localeCompare(a.asOfDate));
+    const sorted = periods
+      .map((period) =>
+        period.source === 'form477'
+          ? { ...period, areaCoverageAvailable: Object.hasOwn(AREA_TABLE_BY_DATE, period.asOfDate) }
+          : period,
+      )
+      .sort((a, b) => b.asOfDate.localeCompare(a.asOfDate));
 
     ctx.log.info('fcc_list_filing_periods succeeded', {
       form477Count: form477Periods.length,
@@ -82,7 +95,7 @@ export const listFilingPeriodsTool = tool('fcc_list_filing_periods', {
       bdcCount: bdcPeriods.length,
       hasBdcCredentials,
       dataNote:
-        'Form 477 data (2015–2021) is queryable via FCC Open Data without credentials. ' +
+        'Form 477 periods with areaCoverageAvailable set to true (Yes in the Area Coverage column) can be queried without credentials. ' +
         (hasBdcCredentials
           ? 'BDC data (2022+) is available as bulk CSV downloads only — use fcc_list_downloads to get file manifests. '
           : 'BDC bulk downloads are unavailable in this deployment. ') +
@@ -97,13 +110,17 @@ export const listFilingPeriodsTool = tool('fcc_list_filing_periods', {
       ``,
       `> ${result.dataNote}`,
       '',
-      `| As-Of Date | Source | Publication Date |`,
-      `|:-----------|:-------|:-----------------|`,
+      `| As-Of Date | Source | Publication Date | Area Coverage |`,
+      `|:-----------|:-------|:-----------------|:--------------|`,
     ];
 
     for (const p of result.periods) {
       const sourceLabel = p.source === 'form477' ? 'Form 477' : 'BDC';
-      lines.push(`| ${p.asOfDate} | ${sourceLabel} | ${p.publicationDate ?? '—'} |`);
+      const areaCoverage =
+        p.areaCoverageAvailable === undefined ? '—' : p.areaCoverageAvailable ? 'Yes' : 'No';
+      lines.push(
+        `| ${p.asOfDate} | ${sourceLabel} | ${p.publicationDate ?? '—'} | ${areaCoverage} |`,
+      );
     }
 
     return [{ type: 'text', text: lines.join('\n') }];

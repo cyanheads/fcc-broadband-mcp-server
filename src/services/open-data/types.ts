@@ -3,12 +3,14 @@
  * @module services/open-data/types
  */
 
+import { AREA_TABLE_BY_DATE, LATEST_AREA_FILING_DATE } from './area-filing-periods.js';
+
 /** Dataset IDs on opendata.fcc.gov for Form 477 data. */
 export const DATASET_IDS = {
   /** Block-level deployment: provider × block × technology × speed (Jun 2021) */
   DEPLOYMENT: 'jdr4-3q4p',
   /** Area table: population by provider-count × speed tier × urban/rural × tribal (Jun 2021) */
-  AREA_TABLE: 'xvwq-qtaj',
+  AREA_TABLE: AREA_TABLE_BY_DATE[LATEST_AREA_FILING_DATE],
   /** Provider summary table: national totals by tech × speed tier (Jun 2021) */
   PROVIDER_SUMMARY: 'yd9y-6jqe',
   /** Geography lookup: GEOID → name, centroid, bounding box */
@@ -52,6 +54,7 @@ export interface RawDeploymentRow {
   blockcode?: string;
   business?: string;
   consumer?: string;
+  dbaname?: string;
   frn?: string;
   hoconum?: string;
   holdingcompanyname?: string;
@@ -63,7 +66,7 @@ export interface RawDeploymentRow {
   techcode?: string;
 }
 
-/** Raw row from the area table (xvwq-qtaj). */
+/** Raw row from a Form 477 Area Table. */
 export interface RawAreaRow {
   has_0?: string;
   has_1?: string;
@@ -148,6 +151,8 @@ export interface DeploymentRecord {
   blockFips: string;
   business: boolean;
   consumer: boolean;
+  dbaName?: string;
+  frn?: string;
   hoconum: string;
   holdingCompanyName: string;
   maxDownloadMbps: number;

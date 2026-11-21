@@ -6,6 +6,11 @@
 import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
 import {
+  areaFilingDateInput,
+  areaVintage,
+  vintageNoticeOutput,
+} from '@/services/open-data/area-filing-periods.js';
+import {
   AREA_SPEED_DESCRIPTION,
   AREA_TECH_DESCRIPTION,
   AREA_TECH_FILTERS,
@@ -91,10 +96,11 @@ export const compareAreasTool = tool('fcc_compare_areas', {
     'Compares broadband coverage metrics across multiple geographies of the same type and returns a ranked table sorted by unserved or underserved population. ' +
     'Compares historical population coverage gaps; it cannot establish current BEAD eligibility or address service. ' +
     'Compares the first 300 distinct geography IDs and discloses duplicates, unmatched IDs and excluded IDs, or set compare_all_states=true for all 50 states + DC. ' +
-    'Data is from FCC Form 477 (as of June 2021).',
+    'Uses historical FCC Form 477 filings (June 2021 by default).',
   annotations: { readOnlyHint: true, openWorldHint: false, idempotentHint: true },
 
   input: z.object({
+    as_of_date: areaFilingDateInput,
     geography_type: z
       .enum(['state', 'county', 'cd', 'place', 'cbsa', 'tribal'])
       .describe(
@@ -163,7 +169,8 @@ export const compareAreasTool = tool('fcc_compare_areas', {
       )
       .describe('Ranked comparison of geographies by the selected sort field.'),
     totalAreas: z.number().describe('Total number of areas compared.'),
-    dataVintage: z.string().describe('Data vintage — Form 477 data as of June 2021.'),
+    dataVintage: z.string().describe('Form 477 filing vintage.'),
+    vintageNotice: vintageNoticeOutput,
   }),
 
   // Agent-facing success-path context: applied filter echo.
@@ -275,6 +282,7 @@ export const compareAreasTool = tool('fcc_compare_areas', {
     };
     const stats = await service.getAreaStatsBatch(
       {
+        asOfDate: input.as_of_date,
         geographyType: input.geography_type,
         geographyIds: geoIds,
         techFilter: input.tech_filter,
@@ -349,6 +357,7 @@ export const compareAreasTool = tool('fcc_compare_areas', {
         input.geography_type,
         sorted.map((s) => s.id),
         requestCtx,
+        input.as_of_date,
       )
       .catch((error: unknown) => {
         if (ctx.signal.aborted || (error instanceof Error && error.name === 'AbortError'))
@@ -386,7 +395,7 @@ export const compareAreasTool = tool('fcc_compare_areas', {
       sortBy: input.sort_by,
       areas,
       totalAreas: areas.length,
-      dataVintage: 'June 2021 (last Form 477 filing period)',
+      ...areaVintage(input.as_of_date),
     };
   },
 
@@ -404,6 +413,7 @@ export const compareAreasTool = tool('fcc_compare_areas', {
       `## Broadband Coverage Comparison`,
       `**Geography Type:** ${result.geographyType} | **Tech:** ${result.techFilter} | **Speed:** ${result.speedDownMbps} Mbps | **Sorted By:** ${sortedBy}`,
       `**Data Vintage:** ${result.dataVintage} | **Areas Compared:** ${result.totalAreas}`,
+      ...(result.vintageNotice ? [`> ${result.vintageNotice}`] : []),
       `**Unmatched IDs:** ${result.unmatchedIds.join(', ') || 'none'}`,
       `**Excluded IDs:** ${result.excludedIds.join(', ') || 'none'}`,
       `**Duplicate IDs:** ${result.duplicateIds.join(', ') || 'none'}`,

@@ -13,6 +13,8 @@ describe('broadband_equity_analysis', () => {
     if (content.type !== 'text') throw new Error('Expected text prompt');
     expect(content.text).toContain('acfow');
     expect(content.text).toContain('100/10');
+    expect(content.text).toContain('as_of_date');
+    expect(content.text).toContain('December 2020');
     expect(content.text).toContain('all fixed wireless');
     expect(content.text).toContain('cannot establish current BEAD eligibility or address service');
     expect(content.text).not.toContain('Identify BEAD-eligible locations');

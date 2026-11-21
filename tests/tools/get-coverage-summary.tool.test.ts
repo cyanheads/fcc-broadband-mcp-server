@@ -67,7 +67,12 @@ describe('getCoverageSummaryTool', () => {
       geography_id: '28',
     });
     expect(result.structuredContent).toMatchObject({ techFilter: 'acfow' });
+    expect(result.structuredContent).toMatchObject({
+      dataVintage: 'June 2021 (last Form 477 filing period)',
+    });
     expect(JSON.stringify(result.content)).toContain('acfow');
+    expect(JSON.stringify(result.content)).toContain('June 2021 (last Form 477 filing period)');
+    expect(mockGetAreaSegments).toHaveBeenCalledTimes(1);
     expect(mockGetAreaSegments).toHaveBeenCalledWith(
       expect.objectContaining({ techFilter: 'acfow' }),
       expect.anything(),
@@ -102,6 +107,7 @@ describe('getCoverageSummaryTool', () => {
       expect(JSON.stringify(result.content)).toContain('**Total Population:** 0');
       expect(mockGetAreaSegments).toHaveBeenCalledTimes(2);
       expect(mockGetAreaSegments.mock.calls[1]![0]).toEqual({
+        asOfDate: '2021-06-30',
         geographyType: 'county',
         geographyId: '28009',
         techFilter: 'acfosw',

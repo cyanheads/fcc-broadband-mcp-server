@@ -5,6 +5,7 @@
 
 import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
+import { escapeMarkdownInline } from '@cyanheads/mcp-ts-core/utils';
 import { getOpenDataService } from '@/services/open-data/open-data-service.js';
 import { TECH_CODE_LABELS, TECH_CODES } from '@/services/open-data/types.js';
 
@@ -51,8 +52,13 @@ export const searchAvailabilityTool = tool('fcc_search_availability', {
       .array(
         z
           .object({
-            providerId: z.string().describe('FCC provider registration number (FRN).'),
+            providerId: z.string().describe('FCC-assigned Form 477 filing number.'),
             providerName: z.string().describe('Registered provider name.'),
+            frn: z
+              .string()
+              .optional()
+              .describe('FCC Registration Number, including leading zeros.'),
+            dbaName: z.string().optional().describe('Doing-business-as name published by the FCC.'),
             holdingCompanyName: z
               .string()
               .describe('Parent holding company name (e.g., "Comcast").'),
@@ -82,11 +88,11 @@ export const searchAvailabilityTool = tool('fcc_search_availability', {
     dataVintage: z
       .string()
       .describe(
-        'Data vintage — all Form 477 data on FCC Open Data is as of June 2021. BDC bulk-file manifests for newer data require a deployment with BDC credentials.',
+        'Block deployment data as of June 2021. BDC bulk-file manifests for newer data require a deployment with BDC credentials.',
       ),
   }),
 
-  // Agent-facing success-path context: applied filter echo and empty-result notice.
+  // Agent-facing success-path context: applied filter echo and notices.
   // Reaches both structuredContent and content[] trailer without a format() entry.
   enrichment: {
     appliedFilters: z
@@ -113,7 +119,7 @@ export const searchAvailabilityTool = tool('fcc_search_availability', {
       .string()
       .optional()
       .describe(
-        'Recovery hint when no providers are found — suggests how to broaden the query. Absent on successful results.',
+        'Recovery hint when no providers match or the FCC identity details are temporarily unavailable for some mirrored offerings.',
       ),
   },
 
@@ -177,6 +183,8 @@ export const searchAvailabilityTool = tool('fcc_search_availability', {
     const providers = records.map((r) => ({
       providerId: r.providerId,
       providerName: r.providerName,
+      ...(r.frn && { frn: r.frn }),
+      ...(r.dbaName && { dbaName: r.dbaName }),
       holdingCompanyName: r.holdingCompanyName,
       hoconum: r.hoconum,
       stateAbbr: r.stateAbbr,
@@ -228,6 +236,8 @@ export const searchAvailabilityTool = tool('fcc_search_availability', {
       for (const p of result.providers) {
         lines.push(`### ${p.holdingCompanyName} (${p.providerName})`);
         lines.push(`**Hoconum:** ${p.hoconum} | **Provider ID:** ${p.providerId}`);
+        if (p.frn) lines.push(`**FRN:** ${escapeMarkdownInline(p.frn)}`);
+        if (p.dbaName) lines.push(`**DBA:** ${escapeMarkdownInline(p.dbaName)}`);
         lines.push(`**Technology:** ${p.techLabel} (code: ${p.techCode})`);
         lines.push(`**Speed:** ${p.maxDownloadMbps} Mbps down / ${p.maxUploadMbps} Mbps up`);
         const serviceTypes = [p.consumer && 'Consumer', p.business && 'Business']

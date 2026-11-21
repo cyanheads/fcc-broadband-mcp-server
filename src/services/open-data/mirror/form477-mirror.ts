@@ -55,6 +55,11 @@ function compact<T extends Record<string, string | undefined>>(
   return out as { [K in keyof T]?: string };
 }
 
+/** Unresolved legacy rows carry the source ID required to look up provider identity. */
+export interface MirroredDeploymentRow extends RawDeploymentRow {
+  unresolvedIdentitySid?: string;
+}
+
 /**
  * Translate a substring name search into an FTS5 phrase-prefix expression
  * (`"comc"* "cable"*`, implicit AND). Token-prefix matching, not arbitrary
@@ -120,7 +125,7 @@ export class Form477Mirror {
   async deploymentByBlock(
     blockFips: string,
     options: { techCodes?: string[]; minSpeedDown?: number; consumer?: boolean },
-  ): Promise<RawDeploymentRow[] | undefined> {
+  ): Promise<MirroredDeploymentRow[] | undefined> {
     if (!(await this.#stateCovered(blockFips.slice(0, 2)))) return;
     const filters: QueryFilter[] = [{ column: 'blockcode', op: 'eq', value: blockFips }];
     if (options.techCodes?.length) {
@@ -144,6 +149,8 @@ export class Form477Mirror {
         blockcode: str(r.blockcode),
         business: str(r.business),
         consumer: str(r.consumer),
+        dbaname: str(r.dbaname),
+        frn: str(r.frn),
         hoconum: str(r.hoconum),
         holdingcompanyname: str(r.holdingcompanyname),
         maxaddown: str(r.maxaddown),
@@ -152,8 +159,26 @@ export class Form477Mirror {
         providername: str(r.providername),
         stateabbr: str(r.stateabbr),
         techcode: str(r.techcode),
+        unresolvedIdentitySid: r.identity_resolved === 1 ? undefined : str(r.sid),
       }),
     );
+  }
+
+  /** Cache confirmed FCC values, including blanks, without changing deployment data or coverage. */
+  async saveDeploymentIdentity(
+    rows: ReadonlyArray<{
+      sid: string;
+      frn?: string | null | undefined;
+      dbaname?: string | null | undefined;
+    }>,
+  ): Promise<void> {
+    const handle = await this.#stores.deployment.raw();
+    const update = handle.prepare(
+      'UPDATE deployment SET frn = ?, dbaname = ?, identity_resolved = 1 WHERE sid = ? AND identity_resolved IS NULL',
+    );
+    handle.transaction(() => {
+      for (const { sid, frn, dbaname } of rows) update.run(frn || null, dbaname || null, sid);
+    }, 'immediate');
   }
 
   async areaSegments(options: {
